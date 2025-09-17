@@ -156,14 +156,28 @@ def get_top_200_active_tickers(tiingo_api_key):
 
 @st.cache_data(ttl=300) # Cache for 5 minutes
 def get_current_price(stock_name, tiingo_api_key):
-    url = f"https://api.tiingo.com/iex/{stock_name.upper()}"
-    headers = {"Authorization": f"Token {tiingo_api_key}"}
+    # Request only the last few business days to get the most recent adjusted close
+    url = f"https://api.tiingo.com/tiingo/daily/{stock_name.upper()}/prices"
+    headers = {'Content-Type': 'application/json', 'Authorization': f'Token {tiingo_api_key}'}
+    # Use a short window (last 5 business days) to avoid large payloads and ensure we get the latest available trading day
+    end_dt = end_date if 'end_date' in globals() else datetime.date.today()
+    start_dt = (pd.to_datetime(end_dt) - pd.offsets.BDay(7)).strftime('%Y-%m-%d')
+    params = {'startDate': start_dt, 'endDate': pd.to_datetime(end_dt).strftime('%Y-%m-%d'), 'resampleFreq': 'daily'}
     try:
-        response = requests.get(url, headers=headers)
+        response = requests.get(url, headers=headers, params=params)
         response.raise_for_status()
         data = response.json()
-        if data and data[0] and 'last' in data[0]:
-            return data[0]['last']
+        # Tiingo returns a list of daily price dicts. Prefer 'adjClose' when available, otherwise fall back to 'close' or 'last'
+        if isinstance(data, list) and len(data) > 0:
+            # Find the most recent entry (should already be ordered, but sort by date to be safe)
+            try:
+                sorted_data = sorted(data, key=lambda x: x.get('date', ''))
+            except Exception:
+                sorted_data = data
+            latest = sorted_data[-1]
+            for key in ('adjClose', 'close', 'last'):
+                if key in latest and latest[key] is not None:
+                    return latest[key]
     except requests.exceptions.HTTPError as e:
         st.warning(f"Tiingo API failed with HTTP error for {stock_name}: {e}. Status code: {e.response.status_code}. Trying yfinance.")
     except Exception as e:
@@ -171,9 +185,13 @@ def get_current_price(stock_name, tiingo_api_key):
     
     try:
         stock = yf.Ticker(stock_name)
-        hist = stock.history(period="1d")
+        # Request a few recent days to make sure we get an adjusted close if today is a holiday/weekend
+        hist = stock.history(period="7d")
         if not hist.empty:
-            return hist['Close'].iloc[-1]
+            # Prefer 'Adj Close' if available
+            if 'Adj Close' in hist.columns:
+                return hist['Adj Close'].dropna().iloc[-1]
+            return hist['Close'].dropna().iloc[-1]
     except Exception as e:
         st.error(f"Could not get current price for {stock_name} from yfinance: {e}")
     return None
