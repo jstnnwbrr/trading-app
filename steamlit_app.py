@@ -164,15 +164,18 @@ def get_current_price(stock_name, tiingo_api_key):
         data = response.json()
         if data and data[0] and 'last' in data[0]:
             return data[0]['last']
-    except Exception:
-        pass # Fallback to yfinance
+    except requests.exceptions.HTTPError as e:
+        st.warning(f"Tiingo API failed with HTTP error for {stock_name}: {e}. Status code: {e.response.status_code}. Trying yfinance.")
+    except Exception as e:
+        st.warning(f"Tiingo API failed with an unexpected error for {stock_name}: {e}. Trying yfinance.")
+    
     try:
         stock = yf.Ticker(stock_name)
         hist = stock.history(period="1d")
         if not hist.empty:
             return hist['Close'].iloc[-1]
     except Exception as e:
-        st.error(f"Could not get current price for {stock_name}: {e}")
+        st.error(f"Could not get current price for {stock_name} from yfinance: {e}")
     return None
 
 def get_data(stock_name, end_date, tiingo_api_key):
