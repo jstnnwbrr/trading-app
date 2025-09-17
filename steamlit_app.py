@@ -30,7 +30,7 @@ from decimal import Decimal
 # --- Initial Setup ---
 warnings.filterwarnings("ignore")
 optuna.logging.set_verbosity(optuna.logging.WARNING)
-st.set_page_config(layout="wide", page_title="Stock Trading Simulator")
+st.set_page_config(layout="wide", page_title="Stock Trading & Analysis Tool")
 
 # --- Database Connection ---
 @st.cache_resource
@@ -439,7 +439,7 @@ def autofit_columns(df, worksheet):
         worksheet.set_column(i, i, column_width)
 
 # --- Main App UI ---
-st.title("📈 Stock Trading Simulator & Forecasting Tool")
+st.title("📈 Newberry Stock Trading & Analysis Tool")
 
 # Get API key from environment variable or secrets
 tiingo_api_key = os.getenv("TIINGO_API_KEY", st.secrets.get("tiingo_api_key"))
@@ -457,7 +457,7 @@ with st.sidebar:
             current_price = get_current_price(trade_ticker, tiingo_api_key)
             if current_price:
                 st.session_state.current_price = current_price
-                st.info(f"Current price for {trade_ticker}: ${current_price:,.2f}")
+                st.info(f"Most recent closing price for {trade_ticker}: ${current_price:,.2f}")
             else:
                 st.warning("Could not fetch price.")
             
