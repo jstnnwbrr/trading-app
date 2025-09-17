@@ -71,7 +71,7 @@ def send_trade_notification(ticker, trade_type, quantity, price):
 
         subject = f"New Trade Alert: {trade_type.upper()} {ticker}"
         body = f"""
-        A new trade has been submitted:
+        Scott has requested a new trade:
 
         Ticker: {ticker}
         Type: {trade_type.upper()}
@@ -156,9 +156,9 @@ def get_top_200_active_tickers(tiingo_api_key):
 
 @st.cache_data(ttl=300) # Cache for 5 minutes
 def get_current_price(stock_name, tiingo_api_key):
+    url = f"https://api.tiingo.com/iex/{stock_name.upper()}"
+    headers = {"Authorization": f"Token {tiingo_api_key}"}
     try:
-        url = f"https://api.tiingo.com/iex/{stock_name.upper()}"
-        headers = {'Content-Type': 'application/json', 'Authorization': f'Token {tiingo_api_key}'}
         response = requests.get(url, headers=headers)
         response.raise_for_status()
         data = response.json()
