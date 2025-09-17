@@ -574,7 +574,7 @@ with tab2:
                 if summary_results:
                     st.header("📊 Consolidated Summary")
                     combined_summary = pd.concat(summary_results, ignore_index=True)
-                    st.dataframe(combined_summary, use_container_width=True)
+                    st.dataframe(combined_summary, width='stretch')
 
                     combined_summary.to_excel(writer, sheet_name='Summary_Stats', index=False)
                     summary_worksheet = writer.sheets["Summary_Stats"]
@@ -593,6 +593,6 @@ with tab3:
     st.header("📜 Trade History")
     trade_history_df = get_trade_history()
     if not trade_history_df.empty:
-        st.dataframe(trade_history_df, use_container_width=True)
+        st.dataframe(trade_history_df, width='stretch')
     else:
         st.info("No trades have been made yet.")
