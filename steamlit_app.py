@@ -25,6 +25,7 @@ from email.mime.multipart import MIMEMultipart
 from sklearn.linear_model import ElasticNet
 from sklearn.metrics import mean_absolute_error
 from statsmodels.tsa.api import VAR
+from decimal import Decimal
 
 # --- Initial Setup ---
 warnings.filterwarnings("ignore")
@@ -234,6 +235,10 @@ def get_portfolio():
     # Calculate portfolio holdings
     for _, row in history.iterrows():
         ticker, trade_type, quantity, price = row['Ticker'], row['Type'], row['Quantity'], row['Price']
+        
+        if isinstance(price, Decimal):
+            price = float(price)
+
         if ticker not in portfolio:
             portfolio[ticker] = {'shares': 0, 'cost': 0.0}
         
