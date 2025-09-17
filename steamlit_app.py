@@ -490,7 +490,7 @@ with tab1:
         col2.metric("Portfolio Value", f"${total_market_value:,.2f}")
         col3.metric("Cash Balance", f"${cash_balance:,.2f}")
         
-        st.dataframe(portfolio_df, use_container_width=True)
+        st.dataframe(portfolio_df, width='stretch')
     else:
         st.metric("Total Account Value", f"${cash_balance:,.2f}")
         st.info("No open positions. Place a trade to get started!")
