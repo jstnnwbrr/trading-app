@@ -63,7 +63,7 @@ def create_trades_table():
 create_trades_table()
 
 # --- Email Function ---
-def send_trade_notification(ticker, trade_type, quantity, price):
+def send_trade_notification(ticker, trade_type, quantity, current_price):
     try:
         sender_email = st.secrets["gmail_user"]
         receiver_email = st.secrets["gmail_user"]  # Sending to yourself
@@ -76,8 +76,8 @@ def send_trade_notification(ticker, trade_type, quantity, price):
         Ticker: {ticker}
         Type: {trade_type.upper()}
         Quantity: {quantity}
-        Price: ${price:,.2f}
-        Total Value: ${quantity * price:,.2f}
+        Price: ${current_price:,.2f}
+        Total Value: ${quantity * current_price:,.2f}
 
         This is an automated notification from the Stock Trading Simulator.
         """
@@ -224,12 +224,12 @@ def get_data(stock_name, end_date, tiingo_api_key):
     return None
 
 # --- Trading Functions ---
-def execute_trade(ticker, trade_type, quantity, price):
+def execute_trade(ticker, trade_type, quantity, current_price):
     if conn:
         with conn.cursor() as cur:
-            rounded_price = round(price, 2)
+            rounded_price = round(current_price, 2)
             cur.execute(
-                "INSERT INTO trades (ticker, trade_type, quantity, price) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO trades (ticker, trade_type, quantity, current_price) VALUES (%s, %s, %s, %s)",
                 (ticker, trade_type, quantity, rounded_price)
             )
             conn.commit()
@@ -241,7 +241,7 @@ def execute_trade(ticker, trade_type, quantity, price):
 def get_trade_history():
     if conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker, trade_type, quantity, price, trade_date FROM trades ORDER BY trade_date DESC")
+            cur.execute("SELECT ticker, trade_type, quantity, current_price, trade_date FROM trades ORDER BY trade_date DESC")
             return pd.DataFrame(cur.fetchall(), columns=['Ticker', 'Type', 'Quantity', 'Price', 'Date'])
     return pd.DataFrame()
 
@@ -448,7 +448,7 @@ tiingo_api_key = os.getenv("TIINGO_API_KEY", st.secrets.get("tiingo_api_key"))
 with st.sidebar:
     st.header("👦 Trading Terminal")
 
-    trade_ticker = st.text_input("Ticker Symbol for Trade", "AAPL").upper()
+    trade_ticker = st.text_input("Ticker Symbol for Trade", "MSFT").upper()
     trade_type = st.radio("Trade Type", ('buy', 'sell'))
     quantity = st.number_input("Quantity", min_value=1, value=10)
 
@@ -460,15 +460,18 @@ with st.sidebar:
                 st.info(f"Most recent closing price for {trade_ticker}: ${current_price:,.2f}")
             else:
                 st.warning("Could not fetch price.")
-            
-    price = st.number_input("Price", value=st.session_state.get('current_price', 150.0), format="%.2f")
 
     if st.button("Submit Trade", type="primary"):
-        if trade_ticker and trade_type and quantity > 0 and price > 0:
-            execute_trade(trade_ticker, trade_type, quantity, price)
+        if trade_ticker and trade_type and quantity > 0 and current_price > 0:
+            execute_trade(trade_ticker, trade_type, quantity, current_price)
+        elif trade_ticker and trade_type and quantity > 0 and not current_price:
+            current_price = get_current_price(trade_ticker, tiingo_api_key)
+            execute_trade(trade_ticker, trade_type, quantity, current_price)
+        elif quantity == 0:
+            st.error("Quantity must be greater than 0.")
         else:
-            st.error("Please fill in all trade details.")
-
+            st.error("Please provide a valid ticker, trade type, and quantity and resubmit.")
+    
     st.markdown("---")
     st.header("⚙️ Forecasting Configuration")
     
