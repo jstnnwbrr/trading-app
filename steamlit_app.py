@@ -449,17 +449,13 @@ with st.sidebar:
     st.header("👦 Trading Terminal")
 
     trade_ticker = st.text_input("Ticker Symbol for Trade", "MSFT").upper()
+    current_price = get_current_price(trade_ticker, tiingo_api_key)
+    if current_price:
+        st.session_state.current_price = current_price
+        st.info(f"Most recent closing price for {trade_ticker}: ${current_price:,.2f}")
+
     trade_type = st.radio("Trade Type", ('buy', 'sell'))
     quantity = st.number_input("Quantity", min_value=1, value=10)
-
-    if st.button("Get Current Price"):
-        with st.spinner("Fetching price..."):
-            current_price = get_current_price(trade_ticker, tiingo_api_key)
-            if current_price:
-                st.session_state.current_price = current_price
-                st.info(f"Most recent closing price for {trade_ticker}: ${current_price:,.2f}")
-            else:
-                st.warning("Could not fetch price.")
 
     if st.button("Submit Trade", type="primary"):
         if trade_ticker and trade_type and current_price and quantity > 0:
