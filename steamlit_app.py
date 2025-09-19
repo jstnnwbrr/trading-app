@@ -462,9 +462,9 @@ with st.sidebar:
                 st.warning("Could not fetch price.")
 
     if st.button("Submit Trade", type="primary"):
-        if trade_ticker and trade_type and quantity > 0 and current_price > 0:
+        if trade_ticker and trade_type and current_price and quantity > 0:
             execute_trade(trade_ticker, trade_type, quantity, current_price)
-        elif trade_ticker and trade_type and quantity > 0 and not current_price:
+        elif trade_ticker and trade_type and not current_price and quantity > 0:
             current_price = get_current_price(trade_ticker, tiingo_api_key)
             execute_trade(trade_ticker, trade_type, quantity, current_price)
         elif quantity == 0:
