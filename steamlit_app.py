@@ -224,12 +224,12 @@ def get_data(stock_name, end_date, tiingo_api_key):
     return None
 
 # --- Trading Functions ---
-def execute_trade(ticker, trade_type, quantity, current_price):
+def execute_trade(ticker, trade_type, quantity, price):
     if conn:
         with conn.cursor() as cur:
-            rounded_price = round(current_price, 2)
+            rounded_price = round(price, 2)
             cur.execute(
-                "INSERT INTO trades (ticker, trade_type, quantity, current_price) VALUES (%s, %s, %s, %s)",
+                "INSERT INTO trades (ticker, trade_type, quantity, price) VALUES (%s, %s, %s, %s)",
                 (ticker, trade_type, quantity, rounded_price)
             )
             conn.commit()
@@ -241,7 +241,7 @@ def execute_trade(ticker, trade_type, quantity, current_price):
 def get_trade_history():
     if conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker, trade_type, quantity, current_price, trade_date FROM trades ORDER BY trade_date DESC")
+            cur.execute("SELECT ticker, trade_type, quantity, price, trade_date FROM trades ORDER BY trade_date DESC")
             return pd.DataFrame(cur.fetchall(), columns=['Ticker', 'Type', 'Quantity', 'Price', 'Date'])
     return pd.DataFrame()
 
