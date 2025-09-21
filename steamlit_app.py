@@ -438,7 +438,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
                 predicted_next_high = max(round(float(next_row.get('High', np.nan)), 2), 0.01) if pd.notna(next_row.get('High', np.nan)) else df['Close'].iloc[-1]
                 predicted_next_low = max(round(float(next_row.get('Low', np.nan)), 2), 0.01) if pd.notna(next_row.get('Low', np.nan)) else df['Close'].iloc[-1]
         except Exception:
-            predicted_next_open = predicted_next_high = predicted_next_low = None
+            predicted_next_open = predicted_next_high = predicted_next_low = df['Close'].iloc[-1]
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
     target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open and predicted_next_low else df['Close'].iloc[-1]
@@ -447,9 +447,9 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
 
     daily_direction = 'flat'
     if target_sell_price > target_buy_price: 
-        daily_direction = 'up'
+        daily_direction = 'up' if horizon_df['Predicted_Close'].iloc[0] > df['Close'].iloc[-1] else 'flat'
     elif target_sell_price < target_buy_price: 
-        daily_direction = 'down'
+        daily_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
 
     daily_recommendation = 'avoid/sell'
     if daily_direction == 'up' and predicted_return > 0.015:
@@ -556,7 +556,7 @@ with st.sidebar:
     stock_list_str = st.text_area("Paste Tickers for Forecasting", default_stocks, height=150)
     
     st.subheader("Forecasting Parameters")
-    n_periods = st.slider("Forecast Horizon (days)", 10, 100, 50)
+    n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
     max_trials = st.slider("Max Optimization Trials", 10, 100, 20)
 
 
