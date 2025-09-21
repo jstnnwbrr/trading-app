@@ -308,8 +308,7 @@ def create_lagged_features(df, interpolate='bfill'):
     return df, significant_lags_dict
 
 def train_test_split(df, train_size=0.80):
-    x_data = df.drop(columns=['Close', 'High', 'Low', 'Open', 'Volume'])
-    y_data = df['Close']
+    x_data, y_data = df.drop(columns=['Close', 'High', 'Low', 'Open', 'Volume']), df['Close']
     split_idx = int(len(x_data) * train_size)
     x_train, x_test = x_data.iloc[:split_idx], x_data.iloc[split_idx:]
     y_train, y_test = y_data.iloc[:split_idx], y_data.iloc[split_idx:]
@@ -355,6 +354,7 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict, s
         for i in range(n_periods):
             last_date = rolling_df.index[-1]
             new_date = last_date + pd.offsets.BusinessDay(1)
+
             var_input = rolling_df[['Close', 'High', 'Low', 'Open', 'Volume']].iloc[-var_fitted.k_ar:]
             
             if var_input.shape[0] < var_fitted.k_ar:
@@ -362,12 +362,14 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict, s
                 break
             
             var_forecast = var_fitted.forecast(y=var_input.values, steps=1)[0]
-            p_close, p_high, p_low, p_open, p_volume = var_forecast
+            predicted_close_var, predicted_high, predicted_low, predicted_open, predicted_volume = var_forecast
 
             next_period = pd.DataFrame({
-                'Close': [max(p_close, 0.01)], 'High': [max(p_high, 0.01)],
-                'Low': [max(p_low, 0.01)], 'Open': [max(p_open, 0.01)],
-                'Volume': [max(p_volume, 0)]
+                'Close': [max(predicted_close_var, 0.01)], 
+                'High': [max(predicted_high, 0.01)],
+                'Low': [max(predicted_low, 0.01)], 
+                'Open': [max(predicted_open, 0.01)],
+                'Volume': [max(predicted_volume, 0)]
             }, index=[new_date])
 
             latest_data = pd.concat([rolling_df[['Close', 'High', 'Low', 'Open', 'Volume']], next_period])
@@ -375,63 +377,103 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict, s
 
             for col in ['Close', 'High', 'Low', 'Open', 'Volume']:
                 for lag in significant_lags_dict[col]['pacf']:
-                    if lag > 0: new_row[f'{col}_lag{lag}'] = new_row[col].shift(lag).iloc[-1]
+                    if lag > 0: 
+                        new_row[f'{col}_lag{lag}'] = new_row[col].shift(lag).iloc[-1]
                 for ma_lag in significant_lags_dict[col]['acf']:
-                    if ma_lag > 0: new_row[f'{col}_ma_lag{ma_lag}'] = new_row[col].shift(1).rolling(window=ma_lag).mean().iloc[-1]
+                    if ma_lag > 0: 
+                        new_row[f'{col}_ma_lag{ma_lag}'] = new_row[col].shift(1).rolling(window=ma_lag).mean().iloc[-1]
 
             feature_cols = new_row.columns.difference(['Close', 'High', 'Low', 'Open', 'Volume'])
             new_row = pd.DataFrame(new_row[feature_cols].values, columns=feature_cols, index=new_row.index).tail(1)
             
-            new_row = create_date_features(new_row.reset_index().rename(columns={'index': 'Date'}))
-            new_row = new_row.set_index('Date').asfreq('B').dropna()[x_data.columns]
+            new_row = new_row.reset_index().rename(columns={'index': 'Date'})
+            new_row = create_date_features(new_row)
+            new_row = new_row.set_index('Date').asfreq('B').dropna()
+            new_row = new_row[x_data.columns]
 
             predicted_value = max(best_model.predict(new_row)[0], 0.01)
             rolling_predictions.append(predicted_value)
 
             final_row = pd.DataFrame({
-                'Close': [predicted_value], 'High': [p_high], 'Low': [p_low],
-                'Open': [p_open], 'Volume': [p_volume]
+                'Close': [predicted_value], 
+                'High': [predicted_high], 
+                'Low': [predicted_low],
+                'Open': [predicted_open], 
+                'Volume': [predicted_volume]
             }, index=[new_date])
             
             rolling_df = pd.concat([rolling_df, final_row])
-            progress_bar.progress((i + 1) / n_periods, text=f"{progress_bar_text} Day {i+1}/{n_periods}...")
-        
+            if i % 5 == 0 or i == n_periods -1:
+                progress_bar.progress((i + 1) / n_periods, text=f"Day {i+1}/{n_periods} forecasted...")
+         
         progress_bar.empty()
         return rolling_predictions, rolling_df
 
     except Exception as e:
-        st.error(f"Error during rolling forecast for {stock_name}: {e}")
+        st.error(f"Error during rolling forecast: {e}")
         return [], df
 
-def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods):
+def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df=None):
     rolling_forecast_df = pd.DataFrame({
         'Date': pd.date_range(start=df.index[-1], periods=n_periods + 1, freq='B')[1:],
         'Predicted_Close': rolling_predictions})
 
     horizon_df = rolling_forecast_df.head(15)
-    high = round(horizon_df['Predicted_Close'].max(), 2)
-    low = round(horizon_df['Predicted_Close'].min(), 2)
-    avg = round(horizon_df['Predicted_Close'].mean(), 2)
-    volatility = round(horizon_df['Predicted_Close'].std() / avg, 3) if avg > 0 else 0
+    predicted_high_15_days = round(horizon_df['Predicted_Close'].max(), 2)
+    predicted_low_15_days = round(horizon_df['Predicted_Close'].min(), 2)
+    predicted_avg_15_days = round(horizon_df['Predicted_Close'].mean(), 2)
+    predicted_volatility_15_days = round(horizon_df['Predicted_Close'].std() / predicted_avg_15_days, 3) if predicted_avg_15_days > 0 else 0
 
     direction = 'flat'
-    if horizon_df['Predicted_Close'].iloc[-1] > horizon_df['Predicted_Close'].iloc[0]: direction = 'up'
-    elif horizon_df['Predicted_Close'].iloc[-1] < horizon_df['Predicted_Close'].iloc[0]: direction = 'down'
+    if horizon_df['Predicted_Close'].iloc[-1] > horizon_df['Predicted_Close'].iloc[0]: 
+        direction = 'up'
+    elif horizon_df['Predicted_Close'].iloc[-1] < horizon_df['Predicted_Close'].iloc[0]: 
+        direction = 'down'
 
-    buy_price = round(avg * (1 - (0.5 * volatility)), 2)
-    sell_price = round(avg * (1 + (0.5 * volatility)), 2)
-    pred_return = ((sell_price / buy_price) - 1) if buy_price > 0 else 0
+    max_buy_price = round(predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days)), 2)
+    target_sell_price = round(predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days)), 2)
+    predicted_return = ((target_sell_price / max_buy_price) - 1) if max_buy_price > 0 else 0
 
+    # Extract predicted Open/High/Low for next (first forecasted) day if available in rolling_df
+    predicted_next_open = predicted_next_high = predicted_next_low = None
+    if rolling_df is not None and not rolling_df.empty:
+        try:
+            base_last_date = df.index[-1]
+            # Find the first row in rolling_df that is strictly after the last real data date
+            future_rows = rolling_df[rolling_df.index > base_last_date]
+            if not future_rows.empty:
+                next_row = future_rows.iloc[0]
+                predicted_next_open = round(float(next_row.get('Open', np.nan)), 2) if pd.notna(next_row.get('Open', np.nan)) else None
+                predicted_next_high = round(float(next_row.get('High', np.nan)), 2) if pd.notna(next_row.get('High', np.nan)) else None
+                predicted_next_low = round(float(next_row.get('Low', np.nan)), 2) if pd.notna(next_row.get('Low', np.nan)) else None
+        except Exception:
+            predicted_next_open = predicted_next_high = predicted_next_low = None
+
+    # Adjust recommendation to consider predicted intraday movement (high/low vs avg)
     recommendation = 'avoid/sell'
-    if direction == 'up' and pred_return > 0.03:
-        recommendation = 'hold' if volatility > 0.10 else 'buy'
+    if direction == 'up' and predicted_return > 0.03:
+        # If predicted intraday range looks wide relative to avg, prefer hold for safety
+        intraday_strength = 0
+        if predicted_next_high and predicted_next_low and predicted_avg_15_days > 0:
+            intraday_strength = (predicted_next_high - predicted_next_low) / predicted_avg_15_days
+        recommendation = 'hold' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.05 else 'buy'
 
-    return rolling_forecast_df, pd.DataFrame({
-        'Ticker Symbol': [stock_name], 'Predicted_High_15_Day': [high],
-        'Predicted_Low_15_Day': [low], 'Predicted_Avg_15_Day': [avg],
-        'Predicted_Volatility_%': [volatility * 100], 'Max_Buy_Price': [buy_price],
-        'Target_Sell_Price': [sell_price], 'Direction': [direction], 
-        'Recommendation': [recommendation], 'Predicted_Return_%': [pred_return * 100]})
+    summary_df = pd.DataFrame({
+        'Ticker Symbol': [stock_name], 
+        'Predicted_High_15_Day': [predicted_high_15_days],
+        'Predicted_Low_15_Day': [predicted_low_15_days], 
+        'Predicted_Avg_15_Day': [predicted_avg_15_days],
+        'Predicted_Volatility_%': [predicted_volatility_15_days * 100], 
+        'Max_Buy_Price': [max_buy_price],
+        'Target_Sell_Price': [target_sell_price], 
+        'Direction': [direction], 
+        'Recommendation': [recommendation],
+        'Predicted_Return_%': [predicted_return * 100],
+        'Predicted_Next_Open': [predicted_next_open],
+        'Predicted_Next_High': [predicted_next_high],
+        'Predicted_Next_Low': [predicted_next_low]})
+
+    return rolling_forecast_df, summary_df
 
 def autofit_columns(df, worksheet):
     for i, column in enumerate(df.columns):
@@ -466,8 +508,8 @@ with st.sidebar:
         elif quantity == 0:
             st.error("Quantity must be greater than 0.")
         else:
-            st.error("Please provide a valid ticker, trade type, and quantity and resubmit.")
-    
+            st.error("Please fill in all trade details.")
+
     st.markdown("---")
     st.header("⚙️ Forecasting Configuration")
     
@@ -572,20 +614,20 @@ with tab2:
                         X_full, y_full = df.drop(columns=['Close', 'High', 'Low', 'Open', 'Volume']), df['Close']
                         best_model.fit(X_full, y_full)
                         
-                        r_preds, r_df = rolling_forecast(df, best_model, n_periods, x_data, s_lags_dict, stock_name)
-                        r_forecast_df, summary_df = finalize_forecast_and_metrics(stock_name, r_preds, df, n_periods)
-                    
-                    forecast_results[stock_name] = r_forecast_df
+                        rolling_predictions, rolling_df = rolling_forecast(df, best_model, n_periods, x_data, s_lags_dict, stock_name)
+                        rolling_forecast_df, summary_df = finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df)
+
+                    forecast_results[stock_name] = rolling_forecast_df
                     summary_results.append(summary_df)
 
-                    fig_forecast = save_plot_forecast(df, r_forecast_df, stock_name)
+                    fig_forecast = save_plot_forecast(df, rolling_forecast_df, stock_name)
                     st.pyplot(fig_forecast)
                     
                     sheet_name = re.sub(r'[\[\]\*:\?/\\ ]', '_', stock_name)[:31]
-                    r_forecast_df.to_excel(writer, sheet_name=sheet_name, index=False)
+                    rolling_forecast_df.to_excel(writer, sheet_name=sheet_name, index=False)
                     worksheet = writer.sheets[sheet_name]
-                    autofit_columns(r_forecast_df, worksheet)
-                    
+                    autofit_columns(rolling_forecast_df, worksheet)
+
                     st.markdown("---")
 
                 if summary_results:
