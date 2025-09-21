@@ -424,16 +424,6 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     predicted_avg_15_days = round(horizon_df['Predicted_Close'].mean(), 2)
     predicted_volatility_15_days = round(horizon_df['Predicted_Close'].std() / predicted_avg_15_days, 3) if predicted_avg_15_days > 0 else 0
 
-    direction = 'flat'
-    if horizon_df['Predicted_Close'].iloc[-1] > horizon_df['Predicted_Close'].iloc[0]: 
-        direction = 'up'
-    elif horizon_df['Predicted_Close'].iloc[-1] < horizon_df['Predicted_Close'].iloc[0]: 
-        direction = 'down'
-
-    max_buy_price = round(predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days)), 2)
-    target_sell_price = round(predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days)), 2)
-    predicted_return = ((target_sell_price / max_buy_price) - 1) if max_buy_price > 0 else 0
-
     # Extract predicted Open/High/Low for next (first forecasted) day if available in rolling_df
     predicted_next_open = predicted_next_high = predicted_next_low = None
     if rolling_df is not None and not rolling_df.empty:
@@ -449,29 +439,67 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         except Exception:
             predicted_next_open = predicted_next_high = predicted_next_low = None
 
-    # Adjust recommendation to consider predicted intraday movement (high/low vs avg)
-    recommendation = 'avoid/sell'
-    if direction == 'up' and predicted_return > 0.03:
+    # Calculate short-term buy/sell targets, predicted return, and recommendations
+    target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open and predicted_next_low else None
+    target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else None
+    predicted_return = ((target_sell_price / target_buy_price) - 1) if target_buy_price > 0 else 0
+
+    daily_direction = 'flat'
+    if horizon_df['Predicted_Close'].iloc[0] > predicted_next_open: 
+        daily_direction = 'up'
+    elif horizon_df['Predicted_Close'].iloc[0] < predicted_next_open: 
+        daily_direction = 'down'
+
+    daily_recommendation = 'avoid/sell'
+    if daily_direction == 'up' and predicted_return > 0.02:
+        daily_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
+
+    # Adjust recommendation for additional conditions
+    if daily_direction == 'up' and predicted_return > 0.02:
         # If predicted intraday range looks wide relative to avg, prefer hold for safety
         intraday_strength = 0
+        if predicted_next_high and predicted_next_low:
+            intraday_strength = (predicted_next_high - predicted_next_low) / np.mean([predicted_next_open, predicted_next_low, predicted_next_high])
+        daily_recommendation = 'hold' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.08 else 'buy'
+
+    # Calculate long-term buy/sell targets, predicted return, and recommendations
+    long_term_buy_price = round((predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days))), 2)
+    long_term_sell_price = round((predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days))), 2)
+    long_term_predicted_return = ((long_term_sell_price / long_term_buy_price) - 1) if long_term_buy_price > 0 else 0
+
+    long_term_direction = 'flat'
+    if horizon_df['Predicted_Close'].iloc[-1] > long_term_buy_price: 
+        long_term_direction = 'up'
+    elif horizon_df['Predicted_Close'].iloc[-1] < long_term_buy_price: 
+        long_term_direction = 'down'
+
+    # Adjust recommendation for additional conditions
+    long_term_recommendation = 'avoid/sell'
+    if long_term_direction == 'up' and predicted_return > 0.03:
+        # If predicted intraday range looks wide relative to avg, prefer hold for safety
+        long_term_strength = 0
         if predicted_next_high and predicted_next_low and predicted_avg_15_days > 0:
-            intraday_strength = (predicted_next_high - predicted_next_low) / predicted_avg_15_days
-        recommendation = 'hold' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.05 else 'buy'
+            long_term_strength = (predicted_high_15_days - predicted_low_15_days) / predicted_avg_15_days
+        long_term_recommendation = 'hold' if predicted_volatility_15_days > 0.10 or long_term_strength > 0.08 else 'buy'
 
     summary_df = pd.DataFrame({
-        'Ticker Symbol': [stock_name], 
-        'Predicted_High_15_Day': [predicted_high_15_days],
-        'Predicted_Low_15_Day': [predicted_low_15_days], 
-        'Predicted_Avg_15_Day': [predicted_avg_15_days],
-        'Predicted_Volatility_%': [predicted_volatility_15_days * 100], 
-        'Max_Buy_Price': [max_buy_price],
-        'Target_Sell_Price': [target_sell_price], 
-        'Direction': [direction], 
-        'Recommendation': [recommendation],
-        'Predicted_Return_%': [predicted_return * 100],
-        'Predicted_Next_Open': [predicted_next_open],
-        'Predicted_Next_High': [predicted_next_high],
-        'Predicted_Next_Low': [predicted_next_low]})
+        'ticker_symbol': [stock_name], 
+        'daily_direction': [daily_direction], 
+        'daily_recommendation': [daily_recommendation],
+        'target_buy_price': [target_buy_price],
+        'target_sell_price': [target_sell_price],
+        'predicted_return_%': [predicted_return * 100],
+        'predicted_open': [predicted_next_open],
+        'predicted_high': [predicted_next_high],
+        'predicted_low': [predicted_next_low],
+        'long_term_direction': [long_term_direction],
+        'long_term_recommendation': [long_term_recommendation],
+        'long_term_buy_price': [long_term_buy_price],
+        'long_term_sell_price': [long_term_sell_price],
+        'predicted_high_15_day': [predicted_high_15_days],
+        'predicted_low_15_day': [predicted_low_15_days], 
+        'predicted_avg_15_day': [predicted_avg_15_days],
+        'predicted_volatility_%': [predicted_volatility_15_days * 100]})
 
     return rolling_forecast_df, summary_df
 
