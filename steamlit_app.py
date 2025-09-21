@@ -461,7 +461,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         intraday_strength = 0
         if predicted_next_high and predicted_next_low:
             intraday_strength = (predicted_next_high - predicted_next_low) / np.mean([predicted_next_open, predicted_next_low, predicted_next_high])
-        daily_recommendation = 'hold' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.08 else 'buy'
+        daily_recommendation = 'avoid/sell' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.05 else 'buy'
 
     # Calculate long-term buy/sell targets, predicted return, and recommendations
     long_term_buy_price = max(round((predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days))), 2), 0.01)
@@ -481,7 +481,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         long_term_strength = 0
         if predicted_next_high and predicted_next_low and predicted_avg_15_days > 0:
             long_term_strength = (predicted_high_15_days - predicted_low_15_days) / predicted_avg_15_days
-        long_term_recommendation = 'hold' if predicted_volatility_15_days > 0.10 or long_term_strength > 0.08 else 'buy'
+        long_term_recommendation = 'avoid/sell' if predicted_volatility_15_days > 0.10 or long_term_strength > 0.10 else 'buy'
 
     summary_df = pd.DataFrame({
         'ticker_symbol': [stock_name], 
