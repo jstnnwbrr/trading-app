@@ -420,10 +420,10 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         'Predicted_Close': rolling_predictions})
 
     horizon_df = rolling_forecast_df.head(15)
-    predicted_high_15_days = round(horizon_df['Predicted_Close'].max(), 2)
-    predicted_low_15_days = round(horizon_df['Predicted_Close'].min(), 2)
-    predicted_avg_15_days = round(horizon_df['Predicted_Close'].mean(), 2)
-    predicted_volatility_15_days = round(horizon_df['Predicted_Close'].std() / predicted_avg_15_days, 3) if predicted_avg_15_days > 0 else 0
+    predicted_high_15_days = max(round(horizon_df['Predicted_Close'].max(), 2), 0.01)
+    predicted_low_15_days = max(round(horizon_df['Predicted_Close'].min(), 2), 0.01)
+    predicted_avg_15_days = max(round(horizon_df['Predicted_Close'].mean(), 2), 0.01)
+    predicted_volatility_15_days = round(horizon_df['Predicted_Close'].std() / predicted_avg_15_days, 3)
 
     # Extract predicted Open/High/Low for next (first forecasted) day if available in rolling_df
     predicted_next_open = predicted_next_high = predicted_next_low = None
@@ -434,21 +434,21 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             future_rows = rolling_df[rolling_df.index > base_last_date]
             if not future_rows.empty:
                 next_row = future_rows.iloc[0]
-                predicted_next_open = round(float(next_row.get('Open', np.nan)), 2) if pd.notna(next_row.get('Open', np.nan)) else None
-                predicted_next_high = round(float(next_row.get('High', np.nan)), 2) if pd.notna(next_row.get('High', np.nan)) else None
-                predicted_next_low = round(float(next_row.get('Low', np.nan)), 2) if pd.notna(next_row.get('Low', np.nan)) else None
+                predicted_next_open = max(round(float(next_row.get('Open', np.nan)), 2), 0.01) if pd.notna(next_row.get('Open', np.nan)) else df['Close'].iloc[-1]
+                predicted_next_high = max(round(float(next_row.get('High', np.nan)), 2), 0.01) if pd.notna(next_row.get('High', np.nan)) else df['Close'].iloc[-1]
+                predicted_next_low = max(round(float(next_row.get('Low', np.nan)), 2), 0.01) if pd.notna(next_row.get('Low', np.nan)) else df['Close'].iloc[-1]
         except Exception:
             predicted_next_open = predicted_next_high = predicted_next_low = None
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
-    target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open and predicted_next_low else None
-    target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else None
+    target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open and predicted_next_low else df['Close'].iloc[-1]
+    target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     predicted_return = ((target_sell_price / target_buy_price) - 1) if target_buy_price > 0 else 0
 
     daily_direction = 'flat'
-    if horizon_df['Predicted_Close'].iloc[0] > predicted_next_open: 
+    if target_sell_price > target_buy_price: 
         daily_direction = 'up'
-    elif horizon_df['Predicted_Close'].iloc[0] < predicted_next_open: 
+    elif target_sell_price < target_buy_price: 
         daily_direction = 'down'
 
     daily_recommendation = 'avoid/sell'
@@ -464,8 +464,8 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         daily_recommendation = 'hold' if predicted_volatility_15_days > 0.10 or intraday_strength > 0.08 else 'buy'
 
     # Calculate long-term buy/sell targets, predicted return, and recommendations
-    long_term_buy_price = round((predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days))), 2)
-    long_term_sell_price = round((predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days))), 2)
+    long_term_buy_price = max(round((predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days))), 2), 0.01)
+    long_term_sell_price = max(round((predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days))), 2), 0.01)
     long_term_predicted_return = ((long_term_sell_price / long_term_buy_price) - 1) if long_term_buy_price > 0 else 0
 
     long_term_direction = 'flat'
