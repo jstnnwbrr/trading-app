@@ -452,11 +452,11 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         daily_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
 
     daily_recommendation = 'avoid/sell'
-    if daily_direction == 'up' and predicted_return > 0.015:
+    if daily_direction == 'up' and predicted_return > 0.01:
         daily_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
 
     # Adjust recommendation for additional conditions
-    if daily_direction == 'up' and predicted_return > 0.015:
+    if daily_direction == 'up' and predicted_return > 0.01:
         # If predicted range looks wide relative to avg, prefer hold for safety
         intraday_strength = 0
         if predicted_next_high and predicted_next_low:
