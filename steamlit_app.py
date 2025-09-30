@@ -420,6 +420,9 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         'Predicted_Close': rolling_predictions})
 
     horizon_df = rolling_forecast_df.head(15)
+
+    predicted_avg_3_days = max(round(horizon_df['Predicted_Close'].head(3).mean(), 2), 0.01)
+
     predicted_high_15_days = max(round(horizon_df['Predicted_Close'].max(), 2), 0.01)
     predicted_low_15_days = max(round(horizon_df['Predicted_Close'].min(), 2), 0.01)
     predicted_avg_15_days = max(round(horizon_df['Predicted_Close'].mean(), 2), 0.01)
@@ -443,7 +446,8 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     # Calculate short-term buy/sell targets, predicted return, and recommendations
     target_buy_price = predicted_next_open if predicted_next_open != 0.01 else df['Close'].iloc[-1]
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
-    predicted_return = ((target_sell_price / target_buy_price) - 1) if target_buy_price > 0 else 0
+    target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
+    predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
 
     daily_direction = 'flat'
     if target_sell_price > target_buy_price: 
@@ -452,26 +456,25 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         daily_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
 
     daily_recommendation = 'avoid/sell'
-    if daily_direction == 'up' and predicted_return > 0.01:
+    if daily_direction == 'up' and predicted_return > 0.007:
         daily_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
 
     # Adjust recommendation for additional conditions
-    if daily_direction == 'up' and predicted_return > 0.01:
+    if daily_direction == 'up' and predicted_return > 0.007:
         # If predicted range looks wide relative to avg, prefer hold for safety
         intraday_strength = 0
         if predicted_next_high and predicted_next_low:
             intraday_strength = (predicted_next_high - predicted_next_low) / np.mean([predicted_next_open, predicted_next_low, predicted_next_high])
-        daily_recommendation = 'avoid/sell' if intraday_strength > 0.075 else 'buy'
+        daily_recommendation = 'avoid/sell' if intraday_strength > 0.08 else 'buy'
 
-    # Calculate long-term buy/sell targets, predicted return, and recommendations
-    long_term_buy_price = max(round((predicted_avg_15_days * (1 - (0.5 * predicted_volatility_15_days))), 2), 0.01)
+    # Calculate long-term sell targets, predicted return, and recommendations
     long_term_sell_price = max(round((predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days))), 2), 0.01)
-    long_term_predicted_return = ((long_term_sell_price / long_term_buy_price) - 1) if long_term_buy_price > 0 else 0
+    long_term_predicted_return = ((long_term_sell_price / target_buy_price) - 1) if target_buy_price > 0 else 0
 
     long_term_direction = 'flat'
-    if horizon_df['Predicted_Close'].iloc[-1] > long_term_buy_price: 
+    if horizon_df['Predicted_Close'].iloc[-1] > target_buy_price: 
         long_term_direction = 'up'
-    elif horizon_df['Predicted_Close'].iloc[-1] < long_term_buy_price: 
+    elif horizon_df['Predicted_Close'].iloc[-1] < target_buy_price: 
         long_term_direction = 'down'
 
     # Adjust recommendation for additional conditions
@@ -486,6 +489,9 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             long_term_strength = (predicted_high_15_days - predicted_low_15_days) / predicted_avg_15_days
         long_term_recommendation = 'avoid/sell' if predicted_volatility_15_days > 0.15 or long_term_strength > 0.10 else 'buy'
 
+    if long_term_direction == 'down':
+        daily_recommendation = 'avoid/sell'
+
     summary_df = pd.DataFrame({
         'ticker_symbol': [stock_name], 
         'daily_direction': [daily_direction], 
@@ -498,7 +504,6 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         'predicted_low': [predicted_next_low],
         'long_term_direction': [long_term_direction],
         'long_term_recommendation': [long_term_recommendation],
-        'long_term_buy_price': [long_term_buy_price],
         'long_term_sell_price': [long_term_sell_price],
         'long_term_predicted_return_%': [long_term_predicted_return * 100],
         'predicted_high_15_day': [predicted_high_15_days],
