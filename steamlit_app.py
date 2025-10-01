@@ -444,28 +444,28 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             predicted_next_open = predicted_next_high = predicted_next_low = df['Close'].iloc[-1]
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
-    target_buy_price = predicted_next_open if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    target_buy_price = round((0.75 * predicted_next_open) + (0.25 * predicted_next_low), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
 
-    daily_direction = 'flat'
+    short_term_direction = 'flat'
     if target_sell_price > target_buy_price: 
-        daily_direction = 'up' if horizon_df['Predicted_Close'].iloc[0] > df['Close'].iloc[-1] else 'flat'
+        short_term_direction = 'up' if horizon_df['Predicted_Close'].iloc[0] > df['Close'].iloc[-1] else 'flat'
     elif target_sell_price < target_buy_price: 
-        daily_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
+        short_term_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
 
-    daily_recommendation = 'avoid/sell'
-    if daily_direction == 'up' and predicted_return > 0.007:
-        daily_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
+    short_term_recommendation = 'avoid/sell'
+    if short_term_direction == 'up' and predicted_return > 0.007:
+        short_term_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
 
     # Adjust recommendation for additional conditions
-    if daily_direction == 'up' and predicted_return > 0.007:
+    if short_term_direction == 'up' and predicted_return > 0.007:
         # If predicted range looks wide relative to avg, prefer hold for safety
         intraday_strength = 0
         if predicted_next_high and predicted_next_low:
             intraday_strength = (predicted_next_high - predicted_next_low) / np.mean([predicted_next_open, predicted_next_low, predicted_next_high])
-        daily_recommendation = 'avoid/sell' if intraday_strength > 0.08 else 'buy'
+        short_term_recommendation = 'avoid/sell' if intraday_strength > 0.08 else 'buy'
 
     # Calculate long-term sell targets, predicted return, and recommendations
     long_term_sell_price = max(round((predicted_avg_15_days * (1 + (0.5 * predicted_volatility_15_days))), 2), 0.01)
@@ -474,7 +474,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     long_term_direction = 'flat'
     if horizon_df['Predicted_Close'].iloc[-1] > target_buy_price: 
         long_term_direction = 'up'
-    elif horizon_df['Predicted_Close'].iloc[-1] < target_buy_price: 
+    if predicted_low_15_days < target_buy_price: 
         long_term_direction = 'down'
 
     # Adjust recommendation for additional conditions
@@ -489,16 +489,22 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             long_term_strength = (predicted_high_15_days - predicted_low_15_days) / predicted_avg_15_days
         long_term_recommendation = 'avoid/sell' if predicted_volatility_15_days > 0.15 or long_term_strength > 0.10 else 'buy'
 
+    # If a dip is foreseen in 15-day horizon, avoid buying
     if long_term_direction == 'down':
-        daily_recommendation = 'avoid/sell'
+        short_term_recommendation = 'avoid/sell'
+
+    # If predicted return is very high (greater than 1000%), likely too good to be true - avoid
+    if predicted_return > 10.00:
+        short_term_recommendation = 'avoid/sell'
+        long_term_recommendation = 'avoid/sell'
 
     summary_df = pd.DataFrame({
         'ticker_symbol': [stock_name], 
-        'daily_direction': [daily_direction], 
-        'daily_recommendation': [daily_recommendation],
+        'short_term_direction': [short_term_direction], 
+        'short_term_recommendation': [short_term_recommendation],
         'target_buy_price': [target_buy_price],
         'target_sell_price': [target_sell_price],
-        'predicted_return_%': [predicted_return * 100],
+        'short_term_predicted_return_%': [predicted_return * 100],
         'predicted_open': [predicted_next_open],
         'predicted_high': [predicted_next_high],
         'predicted_low': [predicted_next_low],
@@ -552,13 +558,15 @@ with st.sidebar:
     st.header("⚙️ Forecasting Configuration")
     
     st.subheader("Ticker Input")
+    st.info("App pre-populates the top 200 most active stocks, but feel free to paste your own tickers - as messy as they may be!")
+
     if tiingo_api_key:
         default_tickers = get_top_200_active_tickers(tiingo_api_key)
         default_stocks = ", ".join(default_tickers)
     else:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
-    stock_list_str = st.text_area("Paste Tickers for Forecasting", default_stocks, height=150)
+    stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
     
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
