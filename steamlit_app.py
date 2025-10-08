@@ -500,7 +500,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     # If a dip within a certain threshold is foreseen in the 15-day horizon, avoid buying
     # Use the second-lowest value to soften responses to a single temporary dip.
     # If the second-lowest is not far below the target buy price, treat the dip as temporary and keep short-term recommendation.
-    DIP_TOLERANCE = 0.01  # 1% tolerance; tweak as needed or expose to UI
+    DIP_TOLERANCE = 0.02  # 2% tolerance; tweak as needed or expose to UI
     if long_term_direction == 'down':
         try:
             # If the second-lowest is significantly below the target buy price (beyond tolerance), cancel short-term buy
@@ -527,13 +527,13 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         'predicted_open': [predicted_next_open],
         'predicted_high': [predicted_next_high],
         'predicted_low': [predicted_next_low],
-        'predicted_second_lowest_15_day': [predicted_second_lowest_15_days],
         'long_term_direction': [long_term_direction],
         'long_term_recommendation': [long_term_recommendation],
         'long_term_sell_price': [long_term_sell_price],
         'long_term_predicted_return_%': [long_term_predicted_return * 100],
         'predicted_high_15_day': [predicted_high_15_days],
         'predicted_low_15_day': [predicted_low_15_days], 
+        'predicted_second_lowest_15_day': [predicted_second_lowest_15_days],
         'predicted_avg_15_day': [predicted_avg_15_days],
         'predicted_volatility_%': [predicted_volatility_15_days * 100]})
 
