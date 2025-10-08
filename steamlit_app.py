@@ -425,6 +425,14 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
 
     predicted_high_15_days = max(round(horizon_df['Predicted_Close'].max(), 2), 0.01)
     predicted_low_15_days = max(round(horizon_df['Predicted_Close'].min(), 2), 0.01)
+    # Compute the second-lowest predicted close within the 15-day horizon to avoid overreacting to a single deep dip
+    horizon_vals = horizon_df['Predicted_Close'].dropna().values
+    if len(horizon_vals) >= 2:
+        sorted_vals = np.sort(horizon_vals)
+        # second-lowest is at index 1 (0-based); ensure it's at least a small positive number
+        predicted_second_lowest_15_days = max(round(float(sorted_vals[1]), 2), 0.01)
+    else:
+        predicted_second_lowest_15_days = predicted_low_15_days
     predicted_avg_15_days = max(round(horizon_df['Predicted_Close'].mean(), 2), 0.01)
     predicted_volatility_15_days = round(horizon_df['Predicted_Close'].std() / predicted_avg_15_days, 3)
 
@@ -450,17 +458,17 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
 
     short_term_direction = 'flat'
-    if target_sell_price > target_buy_price: 
-        short_term_direction = 'up' if horizon_df['Predicted_Close'].iloc[0] > df['Close'].iloc[-1] else 'flat'
-    elif target_sell_price < target_buy_price: 
-        short_term_direction = 'down' if horizon_df['Predicted_Close'].iloc[0] < df['Close'].iloc[-1] else 'flat'
+    if predicted_return > 0: 
+        short_term_direction = 'up' 
+    elif predicted_return < 0: 
+        short_term_direction = 'down'
 
     short_term_recommendation = 'avoid/sell'
-    if short_term_direction == 'up' and predicted_return > 0.007:
+    if short_term_direction == 'up' and predicted_return > 0.005:
         short_term_recommendation = 'buy' if predicted_volatility_15_days < 0.10 else 'hold'
 
     # Adjust recommendation for additional conditions
-    if short_term_direction == 'up' and predicted_return > 0.007:
+    if short_term_direction == 'up' and predicted_return > 0.005:
         # If predicted range looks wide relative to avg, prefer hold for safety
         intraday_strength = 0
         if predicted_next_high and predicted_next_low:
@@ -489,9 +497,20 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             long_term_strength = (predicted_high_15_days - predicted_low_15_days) / predicted_avg_15_days
         long_term_recommendation = 'avoid/sell' if predicted_volatility_15_days > 0.15 or long_term_strength > 0.10 else 'buy'
 
-    # If a dip is foreseen in 15-day horizon, avoid buying
+    # If a dip within a certain threshold is foreseen in the 15-day horizon, avoid buying
+    # Use the second-lowest value to soften responses to a single temporary dip.
+    # If the second-lowest is not far below the target buy price, treat the dip as temporary and keep short-term recommendation.
+    DIP_TOLERANCE = 0.01  # 1% tolerance; tweak as needed or expose to UI
     if long_term_direction == 'down':
-        short_term_recommendation = 'avoid/sell'
+        try:
+            # If the second-lowest is significantly below the target buy price (beyond tolerance), cancel short-term buy
+            if predicted_second_lowest_15_days < (target_buy_price * (1 - DIP_TOLERANCE)):
+                short_term_recommendation = 'avoid/sell'
+            else:
+                # treat as temporary dip: do not override previously determined short_term_recommendation
+                pass
+        except Exception:
+            short_term_recommendation = 'avoid/sell'
 
     # If predicted return is very high (greater than 1000%), likely too good to be true - avoid
     if predicted_return > 10.00:
@@ -508,6 +527,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         'predicted_open': [predicted_next_open],
         'predicted_high': [predicted_next_high],
         'predicted_low': [predicted_next_low],
+        'predicted_second_lowest_15_day': [predicted_second_lowest_15_days],
         'long_term_direction': [long_term_direction],
         'long_term_recommendation': [long_term_recommendation],
         'long_term_sell_price': [long_term_sell_price],
