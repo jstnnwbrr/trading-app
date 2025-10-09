@@ -512,8 +512,8 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         except Exception:
             short_term_recommendation = 'avoid/sell'
 
-    # If predicted return is very high (greater than 1000%), likely too good to be true - avoid
-    if predicted_return > 10.00:
+    # If predicted return is very high (greater than 50%), likely too good to be true - avoid
+    if predicted_return > 0.50:
         short_term_recommendation = 'avoid/sell'
         long_term_recommendation = 'avoid/sell'
 
