@@ -634,6 +634,8 @@ with tab2:
             st.error("No valid stock tickers found. Please enter tickers.")
         else:
             st.success(f"Found {len(stock_list)} unique tickers to process: {', '.join(stock_list)}")
+            st.success(f"The following {len(do_not_buy_list)} tickers were identified as Do Not Buy: {', '.join(do_not_buy_list)}")
+
             today = datetime.date.today()
             end_date = today + pd.offsets.BusinessDay(1)
             
