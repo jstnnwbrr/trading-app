@@ -587,11 +587,11 @@ with st.sidebar:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
-    
+    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "APPN, BTG, IOVA", height=100, help="Tickers you do not wish to buy...")
+
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
     max_trials = st.slider("Max Optimization Trials", 10, 100, 20)
-
 
 # --- Main Content Tabs ---
 tab1, tab2, tab3 = st.tabs(["📊 Portfolio Dashboard", "📈 Forecasting", "📜 Trade History"])
@@ -624,6 +624,9 @@ with tab2:
     st.header("📈 Forecasting Tool")
     if st.button("🚀 Run Forecast"):
         stock_list = parse_and_clean_tickers(stock_list_str)
+        do_not_buy_list = parse_and_clean_tickers(do_not_buy_list_str) if do_not_buy_list_str else []
+        do_not_buy_list = [ticker.strip().upper() for ticker in do_not_buy_list if ticker.strip()]
+        stock_list = [ticker for ticker in stock_list if ticker not in do_not_buy_list]
         
         if not tiingo_api_key:
             st.error("`TIINGO_API_KEY` is not set. Please configure it in your secrets.")
