@@ -2,13 +2,15 @@
 # To run this app, save it as a python file (e.g., app.py) and run: streamlit run app.py
 # Make sure to set the environment variables before running.
 # Make sure to install all necessary libraries:
-# pip install streamlit pandas numpy scikit-learn statsmodels optuna yfinance requests matplotlib xlsxwriter openpyxl psycopg2-binary
+# pip install streamlit pandas numpy scikit-learn statsmodels optuna yfinance requests matplotlib xlsxwriter openpyxl psycopg2-binary kaleido
 
 import streamlit as st
 import datetime
 import matplotlib.pyplot as plt
 import numpy as np
 import optuna
+import plotly.express as px
+import plotly.graph_objects as go
 import os
 import pandas as pd
 import requests
@@ -283,6 +285,127 @@ def get_portfolio():
     ])
     
     return portfolio_df, cash_balance
+
+
+@st.cache_data(ttl=3600)
+def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0):
+    """Simulate account value over time using trade history and index comparisons.
+    Returns a DataFrame indexed by business day with columns: AccountValue, DJIA, S&P500, Nasdaq
+    """
+    if trades_df is None or trades_df.empty:
+        return None
+
+    # Ensure trade dates are datetimes without tz
+    trades = trades_df.copy()
+    trades['Date'] = pd.to_datetime(trades['Date']).dt.tz_localize(None)
+    trades = trades.sort_values('Date')
+
+    start_date = trades['Date'].dt.date.min()
+    end_date = datetime.date.today()
+    biz_index = pd.date_range(start=start_date, end=end_date, freq='B')
+
+    # Unique tickers from history
+    tickers = trades['Ticker'].unique().tolist()
+    # Map index symbols to ETFs available via Tiingo
+    index_map = {'^DJI': 'DIA', '^GSPC': 'SPY', '^IXIC': 'QQQ'}
+    all_symbols = tickers + list(index_map.values())
+
+    # Fetch adjusted close prices per symbol from Tiingo
+    price_frames = []
+    headers = {'Content-Type': 'application/json', 'Authorization': f'Token {tiingo_api_key}'}
+    for sym in all_symbols:
+        try:
+            throttle_request()
+            url = f"https://api.tiingo.com/tiingo/daily/{sym}/prices"
+            params = {'startDate': start_date.strftime('%Y-%m-%d') if isinstance(start_date, (datetime.date, datetime.datetime)) else str(start_date),
+                      'endDate': (end_date + datetime.timedelta(days=1)).strftime('%Y-%m-%d'),
+                      'resampleFreq': 'daily'}
+            resp = requests.get(url, headers=headers, params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json()
+            if not data:
+                continue
+            df_sym = pd.DataFrame(data)
+            if 'date' in df_sym.columns:
+                df_sym['date'] = pd.to_datetime(df_sym['date']).dt.tz_localize(None)
+                # Prefer adjClose, then close
+                if 'adjClose' in df_sym.columns:
+                    series = df_sym.set_index('date')['adjClose']
+                elif 'close' in df_sym.columns:
+                    series = df_sym.set_index('date')['close']
+                else:
+                    continue
+                series.name = sym
+                price_frames.append(series)
+        except Exception:
+            # skip missing symbol
+            continue
+
+    if not price_frames:
+        df = pd.DataFrame(index=biz_index)
+        df['AccountValue'] = initial_cash
+        df['DJIA'] = np.nan
+        df['SP500'] = np.nan
+        df['Nasdaq'] = np.nan
+        return df
+
+    price_df = pd.concat(price_frames, axis=1)
+    # Reindex to biz_index (datetime) and forward/backfill
+    price_df = price_df.reindex(pd.to_datetime(biz_index)).ffill().bfill()
+    # Rename ETF index columns back to index labels for plotting
+    # reverse map
+    reverse_index_map = {v: k for k, v in index_map.items()}
+    for etf_sym, idx_label in reverse_index_map.items():
+        if etf_sym in price_df.columns:
+            price_df.rename(columns={etf_sym: idx_label}, inplace=True)
+
+    # Prepare simulation
+    holdings = {t: 0 for t in tickers}
+    cash = initial_cash
+    account_values = []
+    trade_iter = trades.to_dict('records')
+    trade_idx = 0
+
+    for current_date in biz_index:
+        # apply all trades up to and including current_date
+        while trade_idx < len(trade_iter) and pd.to_datetime(trade_iter[trade_idx]['Date']).date() <= current_date.date():
+            tr = trade_iter[trade_idx]
+            sym = tr['Ticker']
+            qty = int(tr['Quantity'])
+            price = float(tr['Price'])
+            if tr['Type'].lower() == 'buy':
+                holdings[sym] = holdings.get(sym, 0) + qty
+                cash -= qty * price
+            else:
+                holdings[sym] = holdings.get(sym, 0) - qty
+                cash += qty * price
+            trade_idx += 1
+
+        # compute market value using Adj Close prices
+        market_value = 0.0
+        for sym, qty in holdings.items():
+            if qty == 0:
+                continue
+            try:
+                px = price_df.get(sym)
+                if px is None:
+                    px_val = np.nan
+                else:
+                    px_val = px.loc[current_date]
+                if pd.isna(px_val):
+                    px_val = 0.0
+            except Exception:
+                px_val = 0.0
+            market_value += qty * float(px_val)
+
+        total_value = cash + market_value
+        account_values.append({'Date': current_date, 'AccountValue': total_value,
+                               'DJIA': price_df.get('^DJI').loc[current_date] if '^DJI' in price_df.columns else np.nan,
+                               'SP500': price_df.get('^GSPC').loc[current_date] if '^GSPC' in price_df.columns else np.nan,
+                               'Nasdaq': price_df.get('^IXIC').loc[current_date] if '^IXIC' in price_df.columns else np.nan})
+
+    out = pd.DataFrame(account_values).set_index('Date')
+    return out
 
 # --- Forecasting Helper Functions ---
 def get_significant_lags(series, alpha=0.15, nlags=None):
@@ -592,6 +715,8 @@ with st.sidebar:
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
     max_trials = st.slider("Max Optimization Trials", 10, 100, 20)
+    st.subheader("Performance Chart Options")
+    indices_to_show = st.multiselect("Benchmarks to include", ['DJIA', 'SP500', 'Nasdaq'], default=['DJIA', 'SP500', 'Nasdaq'], help="Choose which benchmark indices to show in the portfolio performance chart")
 
 # --- Main Content Tabs ---
 tab1, tab2, tab3 = st.tabs(["📊 Portfolio Dashboard", "📈 Forecasting", "📜 Trade History"])
@@ -616,6 +741,145 @@ with tab1:
         col3.metric("Cash Balance", f"${cash_balance:,.2f}")
         
         st.dataframe(portfolio_df, width='stretch')
+        # --- Account performance vs major indices ---
+        try:
+            trade_history = get_trade_history()
+            perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=cash_balance)
+            if perf_df is not None:
+                # UI controls for date range, normalization and extra metrics
+                min_date = perf_df.index.min().date()
+                max_date = perf_df.index.max().date()
+                date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
+                normalize = st.checkbox("Normalize series to 100 (relative performance)", value=True)
+                show_metrics = st.checkbox("Show cumulative returns and drawdown", value=False)
+
+                # Filter perf_df by date range
+                start_dt, end_dt = date_range if isinstance(date_range, (list, tuple)) else (min_date, max_date)
+                plot_window = perf_df.loc[(perf_df.index.date >= start_dt) & (perf_df.index.date <= end_dt)].copy()
+
+                # Allow user to pick benchmarks from sidebar multiselect
+                selected_indices = [col for col in ['DJIA', 'SP500', 'Nasdaq'] if col in plot_window.columns and col in st.session_state.get('indices_to_show', indices_to_show) if True]
+                cols_to_plot = ['AccountValue'] + selected_indices
+
+                plot_df = plot_window[cols_to_plot].copy()
+                abs_df = plot_df.copy()
+
+                # Summary metrics (AccountValue) — total return, annualized return, max drawdown
+                summary_metrics = {'total_return_pct': None, 'annualized_return_pct': None, 'max_drawdown_pct': None}
+                try:
+                    acct = abs_df['AccountValue'].dropna()
+                    if len(acct) >= 2:
+                        start_val = float(acct.iloc[0])
+                        end_val = float(acct.iloc[-1])
+                        total_return = (end_val / start_val) - 1.0 if start_val != 0 else 0.0
+                        # trading days count
+                        trading_days = len(acct) - 1
+                        annualized = (1 + total_return) ** (252.0 / trading_days) - 1.0 if trading_days > 0 else 0.0
+                        running_max = acct.cummax()
+                        drawdowns = (acct / running_max) - 1.0
+                        max_dd = drawdowns.min()
+                        summary_metrics['total_return_pct'] = round(total_return * 100.0, 2)
+                        summary_metrics['annualized_return_pct'] = round(annualized * 100.0, 2)
+                        summary_metrics['max_drawdown_pct'] = round(max_dd * 100.0, 2)
+                except Exception:
+                    pass
+
+                # Show summary metrics
+                try:
+                    mcol1, mcol2, mcol3 = st.columns(3)
+                    mcol1.metric("Total Return", f"{summary_metrics['total_return_pct'] if summary_metrics['total_return_pct'] is not None else 'N/A'}%")
+                    mcol2.metric("Annualized Return", f"{summary_metrics['annualized_return_pct'] if summary_metrics['annualized_return_pct'] is not None else 'N/A'}%")
+                    mcol3.metric("Max Drawdown", f"{summary_metrics['max_drawdown_pct'] if summary_metrics['max_drawdown_pct'] is not None else 'N/A'}%")
+                except Exception:
+                    pass
+
+                if normalize:
+                    for col in plot_df.columns:
+                        first_valid = plot_df[col].dropna().iloc[0] if not plot_df[col].dropna().empty else np.nan
+                        if pd.notna(first_valid) and first_valid != 0:
+                            plot_df[col] = (plot_df[col] / first_valid) * 100.0
+                        else:
+                            plot_df[col] = np.nan
+
+                # Main performance chart
+                fig = go.Figure()
+                for col in plot_df.columns:
+                    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df[col], mode='lines', name=col))
+                y_label = 'Index (Normalized to 100)' if normalize else 'Value'
+                fig.update_layout(title='Account Performance vs Major Indices', xaxis_title='Date', yaxis_title=y_label, template='plotly_white')
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Download performance as Excel with sheets and optional images
+                try:
+                    excel_buffer = io.BytesIO()
+                    with pd.ExcelWriter(excel_buffer, engine='xlsxwriter') as ew:
+                        # Performance data
+                        abs_df.to_excel(ew, sheet_name='Performance_Data')
+
+                        # Cumulative returns sheet
+                        try:
+                            cret = abs_df.copy()
+                            for col in cret.columns:
+                                first = cret[col].dropna().iloc[0] if not cret[col].dropna().empty else np.nan
+                                cret[col] = (cret[col] / first - 1) * 100.0 if pd.notna(first) and first != 0 else np.nan
+                            cret.to_excel(ew, sheet_name='Cumulative_Returns')
+                        except Exception:
+                            pass
+
+                        # Drawdown sheet
+                        try:
+                            dd = abs_df.copy()
+                            for col in dd.columns:
+                                series = dd[col]
+                                running_max = series.cummax()
+                                dd[col] = (series / running_max - 1) * 100.0
+                            dd.to_excel(ew, sheet_name='Drawdown')
+                        except Exception:
+                            pass
+
+                        # Insert main chart image if possible (best-effort)
+                        try:
+                            img_bytes = fig.to_image(format='png', width=1200, height=600)
+                            workbook = ew.book
+                            worksheet = workbook.add_worksheet('Charts')
+                            worksheet.insert_image('B2', 'chart.png', {'image_data': io.BytesIO(img_bytes)})
+                        except Exception:
+                            pass
+                        ew.close()
+                    excel_buffer.seek(0)
+                    st.download_button('Download Performance as Excel', data=excel_buffer, file_name='performance.xlsx', mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+                except Exception:
+                    # If Excel export fails, ignore and continue
+                    pass
+
+                # Additional metrics: cumulative returns and drawdown
+                if show_metrics:
+                    # Cumulative returns (%) from start
+                    cret = abs_df.copy()
+                    for col in cret.columns:
+                        first = cret[col].dropna().iloc[0] if not cret[col].dropna().empty else np.nan
+                        cret[col] = (cret[col] / first - 1) * 100.0 if pd.notna(first) and first != 0 else np.nan
+
+                    fig_cr = go.Figure()
+                    for col in cret.columns:
+                        fig_cr.add_trace(go.Scatter(x=cret.index, y=cret[col], mode='lines', name=col))
+                    fig_cr.update_layout(title='Cumulative Return (%)', xaxis_title='Date', yaxis_title='Return %', template='plotly_white')
+                    st.plotly_chart(fig_cr, use_container_width=True)
+
+                    # Drawdown (%)
+                    dd = abs_df.copy()
+                    for col in dd.columns:
+                        series = dd[col]
+                        running_max = series.cummax()
+                        dd[col] = (series / running_max - 1) * 100.0
+
+                    fig_dd = go.Figure()
+                    for col in dd.columns:
+                        fig_dd.add_trace(go.Scatter(x=dd.index, y=dd[col], mode='lines', name=col))
+                    fig_dd.update_layout(title='Drawdown (%)', xaxis_title='Date', yaxis_title='Drawdown %', template='plotly_white')
+                    st.plotly_chart(fig_dd, use_container_width=True)
+        except Exception as e:
+            st.warning(f"Could not render performance chart: {e}")
     else:
         st.metric("Total Account Value", f"${cash_balance:,.2f}")
         st.info("No open positions. Place a trade to get started!")
