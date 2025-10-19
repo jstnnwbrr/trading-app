@@ -461,7 +461,7 @@ def get_price_on_date(symbol, date, tiingo_api_key):
     return np.nan
 
 
-def impute_spikes(series, multiplier=2.9):
+def impute_spikes(series, multiplier=2.5):
     """Replace any value that is >= multiplier * previous_day with previous_day's value.
     Returns a new Series.
     """
@@ -943,7 +943,7 @@ with tab1:
 
                 # Impute spikes in AccountValue series before scaling
                 if 'AccountValue' in abs_df.columns:
-                    abs_df['AccountValue'] = impute_spikes(abs_df['AccountValue'], multiplier=2.9)
+                    abs_df['AccountValue'] = impute_spikes(abs_df['AccountValue'], multiplier=2.5)
                 # Ensure AccountValue exists in plot_df_norm
                 if 'AccountValue' not in plot_df_norm.columns and 'AccountValue' in abs_df.columns:
                     plot_df_norm['AccountValue'] = (abs_df['AccountValue'] / abs_df['AccountValue'].dropna().iloc[0]) * 100.0 if not abs_df['AccountValue'].dropna().empty else plot_df_norm.iloc[:, 0]
@@ -960,9 +960,24 @@ with tab1:
                     st.warning('Cannot scale to account value: missing anchor/account value.')
 
                 # Main performance chart
+                color_map = {
+                    'AccountValue': '#6a0dad',  # purple
+                    'Account': '#6a0dad',
+                    'DJIA': '#1f77b4',
+                    '^DJI': '#1f77b4',
+                    'SP500': '#d62728',
+                    '^GSPC': '#d62728',
+                    'Nasdaq': '#2ca02c',
+                    '^IXIC': '#2ca02c'
+                }
+
                 fig = go.Figure()
                 for col in plot_to_show.columns:
-                    fig.add_trace(go.Scatter(x=plot_to_show.index, y=plot_to_show[col], mode='lines', name=col))
+                    color = color_map.get(col, None)
+                    if color is not None:
+                        fig.add_trace(go.Scatter(x=plot_to_show.index, y=plot_to_show[col], mode='lines', name=col, line=dict(color=color)))
+                    else:
+                        fig.add_trace(go.Scatter(x=plot_to_show.index, y=plot_to_show[col], mode='lines', name=col))
                 fig.update_layout(title='Account Performance vs Major Indices', xaxis_title='Date', yaxis_title=y_label, template='plotly_white')
                 st.plotly_chart(fig, use_container_width=True)
 
@@ -1053,7 +1068,7 @@ with tab1:
                                         scen_plot = scen_plot.reindex(plot_window.index).ffill().bfill()
                                         if 'AccountValue' in scen_plot.columns and not scen_plot['AccountValue'].dropna().empty:
                                             # Impute spikes in the scenario AccountValue as well
-                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.9)
+                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.5)
                                             # Normalize scenario to 100 then scale using the same scaling_factor as main plot (if available)
                                             scen_norm = scen_plot.copy()
                                             first_val = scen_norm['AccountValue'].dropna().iloc[0]
@@ -1067,7 +1082,8 @@ with tab1:
                                                     sf = (anchor_value / norm_last_local) if anchor_value is not None and norm_last_local and norm_last_local != 0 else 1.0
                                                 scen_scaled = scen_norm * sf
                                                 overlay_fig = fig
-                                                overlay_fig.add_trace(go.Scatter(x=scen_scaled.index, y=scen_scaled['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}'))
+                                                acct_color = color_map.get('AccountValue', '#6a0dad')
+                                                overlay_fig.add_trace(go.Scatter(x=scen_scaled.index, y=scen_scaled['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}', line=dict(color=acct_color, dash='dash')))
                                                 st.plotly_chart(overlay_fig, use_container_width=True)
                                             else:
                                                 st.warning('Scenario series has zero first value; cannot normalize for overlay.')
