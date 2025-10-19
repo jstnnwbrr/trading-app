@@ -461,7 +461,7 @@ def get_price_on_date(symbol, date, tiingo_api_key):
     return np.nan
 
 
-def impute_spikes(series, multiplier=2.9):
+def impute_spikes(series, multiplier=2.5):
     """Replace any value that is >= multiplier * previous_day with previous_day's value.
     Returns a new Series.
     """
@@ -887,29 +887,31 @@ with tab1:
 
                 # Ensure columns exist before slicing
                 plot_df = plot_window[cols_to_plot].copy() if not plot_window.empty and all(c in plot_window.columns for c in cols_to_plot) else plot_window.copy()
+                # Reassign abs_df to use imputed plot_df so all downstream charts/exports use cleaned values
                 abs_df = plot_df.copy()
 
-                # Summary metrics (AccountValue) — total return, annualized return, max drawdown
+                # Summary metrics (AccountValue) — total return, annualized return, max drawdown (recomputed after imputation)
                 summary_metrics = {'total_return_pct': None, 'annualized_return_pct': None, 'max_drawdown_pct': None}
                 try:
-                    acct = abs_df['AccountValue'].dropna()
-                    if len(acct) >= 2:
-                        start_val = float(acct.iloc[0])
-                        end_val = float(acct.iloc[-1])
-                        total_return = (end_val / start_val) - 1.0 if start_val != 0 else 0.0
-                        # trading days count
-                        trading_days = len(acct) - 1
-                        annualized = (1 + total_return) ** (252.0 / trading_days) - 1.0 if trading_days > 0 else 0.0
-                        running_max = acct.cummax()
-                        drawdowns = (acct / running_max) - 1.0
-                        max_dd = drawdowns.min()
-                        summary_metrics['total_return_pct'] = round(total_return * 100.0, 2)
-                        summary_metrics['annualized_return_pct'] = round(annualized * 100.0, 2)
-                        summary_metrics['max_drawdown_pct'] = round(max_dd * 100.0, 2)
+                    if 'AccountValue' in abs_df.columns:
+                        acct = abs_df['AccountValue'].dropna()
+                        if len(acct) >= 2:
+                            start_val = float(acct.iloc[0])
+                            end_val = float(acct.iloc[-1])
+                            total_return = (end_val / start_val) - 1.0 if start_val != 0 else 0.0
+                            # trading days count
+                            trading_days = len(acct) - 1
+                            annualized = (1 + total_return) ** (252.0 / trading_days) - 1.0 if trading_days > 0 else 0.0
+                            running_max = acct.cummax()
+                            drawdowns = (acct / running_max) - 1.0
+                            max_dd = drawdowns.min()
+                            summary_metrics['total_return_pct'] = round(total_return * 100.0, 2)
+                            summary_metrics['annualized_return_pct'] = round(annualized * 100.0, 2)
+                            summary_metrics['max_drawdown_pct'] = round(max_dd * 100.0, 2)
                 except Exception:
                     pass
 
-                # Show summary metrics
+                # Show summary metrics (use imputed values)
                 try:
                     mcol1, mcol2, mcol3 = st.columns(3)
                     mcol1.metric("Total Return", f"{summary_metrics['total_return_pct'] if summary_metrics['total_return_pct'] is not None else 'N/A'}%")
@@ -921,7 +923,7 @@ with tab1:
                 # Apply spike imputation to AccountValue before normalization so normalization uses cleaned values
                 try:
                     if 'AccountValue' in plot_df.columns:
-                        plot_df['AccountValue'] = impute_spikes(plot_df['AccountValue'], multiplier=2.9)
+                        plot_df['AccountValue'] = impute_spikes(plot_df['AccountValue'], multiplier=2.5)
                 except Exception:
                     pass
 
@@ -1110,7 +1112,7 @@ with tab1:
                                         scen_plot = scen_plot.reindex(plot_window.index).ffill().bfill()
                                         if 'AccountValue' in scen_plot.columns and not scen_plot['AccountValue'].dropna().empty:
                                             # Impute spikes in the scenario AccountValue as well
-                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.9)
+                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.5)
                                             # Normalize scenario to 100 then scale using the same scaling_factor as main plot (if available)
                                             scen_norm = scen_plot.copy()
                                             first_val = scen_norm['AccountValue'].dropna().iloc[0]
