@@ -248,7 +248,7 @@ def get_trade_history():
 
 def get_portfolio():
     history = get_trade_history()
-    cash_balance = 100000.0  # Starting capital
+    cash_balance = 52785.13  # Starting capital
     if history.empty:
         return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
     
