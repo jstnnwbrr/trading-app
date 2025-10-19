@@ -461,13 +461,14 @@ def get_price_on_date(symbol, date, tiingo_api_key):
     return np.nan
 
 
-def impute_spikes(series, multiplier=2.5):
+def impute_spikes(series, multiplier=2.9):
     """Replace any value that is >= multiplier * previous_day with previous_day's value.
     Returns a new Series.
     """
     try:
         s = series.copy().astype(float)
-        prev = s.shift(1)
+        # previous valid value (use forward-fill then shift to get last valid prior to current)
+        prev = s.fillna(method='ffill').shift(1)
         # avoid division by zero warnings; treat prev==0 as spike (will set to prev which is 0)
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio = s / prev
@@ -917,6 +918,13 @@ with tab1:
                 except Exception:
                     pass
 
+                # Apply spike imputation to AccountValue before normalization so normalization uses cleaned values
+                try:
+                    if 'AccountValue' in plot_df.columns:
+                        plot_df['AccountValue'] = impute_spikes(plot_df['AccountValue'], multiplier=2.9)
+                except Exception:
+                    pass
+
                 # Normalize (always on) into a separate DataFrame to preserve raw values
                 plot_df_norm = plot_df.copy()
                 for col in plot_df_norm.columns:
@@ -941,9 +949,7 @@ with tab1:
                 except Exception:
                     anchor_value = None
 
-                # Impute spikes in AccountValue series before scaling
-                if 'AccountValue' in abs_df.columns:
-                    abs_df['AccountValue'] = impute_spikes(abs_df['AccountValue'], multiplier=2.5)
+                # abs_df already reflects plot_df (imputed) values
                 # Ensure AccountValue exists in plot_df_norm
                 if 'AccountValue' not in plot_df_norm.columns and 'AccountValue' in abs_df.columns:
                     plot_df_norm['AccountValue'] = (abs_df['AccountValue'] / abs_df['AccountValue'].dropna().iloc[0]) * 100.0 if not abs_df['AccountValue'].dropna().empty else plot_df_norm.iloc[:, 0]
@@ -1041,6 +1047,42 @@ with tab1:
                                     st.dataframe(contrib_df)
                                 else:
                                     st.info('No holdings on that date.')
+                                # Diagnostic: show original vs imputed AccountValue for the diag_date and previous day
+                                try:
+                                    # find matching index in perf_df for diag_date
+                                    perf_idx = pd.to_datetime(perf_df.index)
+                                    mask_date = perf_idx.normalize() == diag_date
+                                    if mask_date.any():
+                                        perf_loc = perf_df.index[mask_date][0]
+                                        orig_val = perf_df.loc[perf_loc, 'AccountValue'] if 'AccountValue' in perf_df.columns else None
+                                    else:
+                                        orig_val = None
+                                    # imputed value from plot_df (we applied imputation earlier)
+                                    plot_idx = pd.to_datetime(plot_df.index)
+                                    mask_plot = plot_idx.normalize() == diag_date
+                                    if mask_plot.any() and 'AccountValue' in plot_df.columns:
+                                        plot_loc = plot_df.index[mask_plot][0]
+                                        imputed_val = plot_df.loc[plot_loc, 'AccountValue']
+                                    else:
+                                        imputed_val = None
+                                    # previous day values for context
+                                    prev_orig = None
+                                    prev_imputed = None
+                                    if mask_date.any():
+                                        # try get previous row in perf_df
+                                        idx_pos = list(perf_df.index).index(perf_loc)
+                                        if idx_pos > 0:
+                                            prev_idx = perf_df.index[idx_pos - 1]
+                                            prev_orig = perf_df.loc[prev_idx, 'AccountValue'] if 'AccountValue' in perf_df.columns else None
+                                    if mask_plot.any():
+                                        ppos = list(plot_df.index).index(plot_loc)
+                                        if ppos > 0:
+                                            prev_plot_idx = plot_df.index[ppos - 1]
+                                            prev_imputed = plot_df.loc[prev_plot_idx, 'AccountValue']
+                                    st.markdown('**Diagnostics (original vs imputed AccountValue)**')
+                                    st.write({'date': str(diag_date.date()), 'original': orig_val, 'imputed': imputed_val, 'prev_original': prev_orig, 'prev_imputed': prev_imputed})
+                                except Exception:
+                                    pass
                         except Exception as e:
                             st.warning(f'Could not compute contributors: {e}')
 
@@ -1068,7 +1110,7 @@ with tab1:
                                         scen_plot = scen_plot.reindex(plot_window.index).ffill().bfill()
                                         if 'AccountValue' in scen_plot.columns and not scen_plot['AccountValue'].dropna().empty:
                                             # Impute spikes in the scenario AccountValue as well
-                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.5)
+                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.9)
                                             # Normalize scenario to 100 then scale using the same scaling_factor as main plot (if available)
                                             scen_norm = scen_plot.copy()
                                             first_val = scen_norm['AccountValue'].dropna().iloc[0]
