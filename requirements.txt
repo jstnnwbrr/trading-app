@@ -10,4 +10,5 @@ matplotlib
 xlsxwriter
 openpyxl
 psycopg2-binary
+plotly
 kaleido
