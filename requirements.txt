@@ -10,3 +10,4 @@ matplotlib
 xlsxwriter
 openpyxl
 psycopg2-binary
+kaleido
