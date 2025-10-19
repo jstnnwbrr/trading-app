@@ -858,7 +858,6 @@ with tab1:
                 date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
                 # Always show real-dollar account value by scaling normalized series to the real ending account value
                 normalize = True
-                show_metrics = st.checkbox("Show cumulative returns", value=False)
 
                 # Normalize/validate date_range into start_dt/end_dt (always datetimes)
                 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
@@ -997,7 +996,7 @@ with tab1:
                         exclude_ticker = st.text_input('Exclude ticker for scenario (leave blank for none)', '')
                         run_scenario = st.button('Run Exclude-Ticker Scenario')
                     with diag_col2:
-                        st.write('Contributors on selected date')
+                        st.write('Trades & Holdings on Selected Date')
                         # Build decomposition table for the selected date
                         try:
                             trades_history = get_trade_history()
@@ -1039,8 +1038,8 @@ with tab1:
                                         shares = row['Shares']
                                         px = get_price_on_date(sym, diag_date, tiingo_api_key)
                                         contrib = shares * (px if not pd.isna(px) else 0.0)
-                                        contrib_rows.append({'Ticker': sym, 'Shares': shares, 'Price': px, 'Contribution': contrib})
-                                    contrib_df = pd.DataFrame(contrib_rows).sort_values('Contribution', ascending=False)
+                                        contrib_rows.append({'Ticker': sym, 'Shares': shares, 'Price': px, 'Market Value': contrib})
+                                    contrib_df = pd.DataFrame(contrib_rows).sort_values('Market Value', ascending=False)
                                     st.dataframe(contrib_df)
                                 else:
                                     st.info('No holdings on that date.')
@@ -1079,7 +1078,7 @@ with tab1:
                                 except Exception:
                                     pass
                         except Exception as e:
-                            st.warning(f'Could not compute contributors: {e}')
+                            st.warning(f'Could not compute trades & holdings: {e}')
 
                     # Scenario: re-run a lean simulation excluding one ticker
                     if run_scenario:
@@ -1185,21 +1184,6 @@ with tab1:
                     # If Excel export fails, ignore and continue
                     pass
 
-                # Additional metrics: cumulative returns
-                if show_metrics:
-                    # Cumulative returns (%) from start
-                    cret = abs_df.copy()
-                    for col in cret.columns:
-                        first = cret[col].dropna().iloc[0] if not cret[col].dropna().empty else np.nan
-                        cret[col] = (cret[col] / first - 1) * 100.0 if pd.notna(first) and first != 0 else np.nan
-
-                    fig_cr = go.Figure()
-                    for col in cret.columns:
-                        fig_cr.add_trace(go.Scatter(x=cret.index, y=cret[col], mode='lines', name=col))
-                    fig_cr.update_layout(title='Cumulative Return (%)', xaxis_title='Date', yaxis_title='Return %', template='plotly_white')
-                    st.plotly_chart(fig_cr, use_container_width=True)
-
-                    # Drawdown plotting removed per simplification request
         except Exception as e:
             st.warning(f"Could not render performance chart: {e}")
     else:
