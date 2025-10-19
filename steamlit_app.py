@@ -352,6 +352,9 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
     price_df = pd.concat(price_frames, axis=1)
     # Reindex to biz_index (datetime) and forward/backfill
     price_df = price_df.reindex(pd.to_datetime(biz_index)).ffill().bfill()
+    # Ensure no duplicate index entries (keep last) to avoid .loc returning a Series
+    if price_df.index.duplicated().any():
+        price_df = price_df[~price_df.index.duplicated(keep='last')]
     # Rename ETF index columns back to index labels for plotting
     # reverse map
     reverse_index_map = {v: k for k, v in index_map.items()}
@@ -365,6 +368,29 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
     account_values = []
     trade_iter = trades.to_dict('records')
     trade_idx = 0
+
+    def _safe_extract(series, dt_index):
+        """Return a single float value for series.loc[dt_index]. If multiple rows exist, return the last non-null value."""
+        try:
+            val = series.loc[dt_index]
+            # If a Series/ndarray is returned due to duplicate index, pick the last non-null
+            if isinstance(val, (pd.Series, pd.DataFrame, list, tuple)):
+                # convert to Series and dropna
+                s = pd.Series(val).dropna()
+                if s.empty:
+                    return np.nan
+                return float(s.iloc[-1])
+            # scalar
+            if pd.isna(val):
+                return np.nan
+            return float(val)
+        except KeyError:
+            return np.nan
+        except Exception:
+            try:
+                return float(val)
+            except Exception:
+                return np.nan
 
     for current_date in biz_index:
         # apply all trades up to and including current_date
@@ -391,7 +417,7 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
                 if px is None:
                     px_val = np.nan
                 else:
-                    px_val = px.loc[current_date]
+                    px_val = _safe_extract(px, current_date)
                 if pd.isna(px_val):
                     px_val = 0.0
             except Exception:
@@ -400,9 +426,9 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
 
         total_value = cash + market_value
         account_values.append({'Date': current_date, 'AccountValue': total_value,
-                               'DJIA': price_df.get('^DJI').loc[current_date] if '^DJI' in price_df.columns else np.nan,
-                               'SP500': price_df.get('^GSPC').loc[current_date] if '^GSPC' in price_df.columns else np.nan,
-                               'Nasdaq': price_df.get('^IXIC').loc[current_date] if '^IXIC' in price_df.columns else np.nan})
+                               'DJIA': _safe_extract(price_df.get('^DJI'), current_date) if '^DJI' in price_df.columns else np.nan,
+                               'SP500': _safe_extract(price_df.get('^GSPC'), current_date) if '^GSPC' in price_df.columns else np.nan,
+                               'Nasdaq': _safe_extract(price_df.get('^IXIC'), current_date) if '^IXIC' in price_df.columns else np.nan})
 
     out = pd.DataFrame(account_values).set_index('Date')
     return out
