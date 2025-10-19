@@ -434,15 +434,18 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
     return out
 
 
+@st.cache_data(ttl=3600)
 def get_price_on_date(symbol, date, tiingo_api_key):
     """Fetch adjClose (or close) for a single symbol on a specific date using Tiingo.
-    Returns float or np.nan.
+    Returns float or np.nan. Cached for 1 hour.
     """
     try:
+        # Normalize date to YYYY-MM-DD string so caching keys are stable
+        date_str = pd.to_datetime(date).strftime('%Y-%m-%d')
         throttle_request()
         headers = {'Content-Type': 'application/json', 'Authorization': f'Token {tiingo_api_key}'}
         url = f"https://api.tiingo.com/tiingo/daily/{symbol}/prices"
-        params = {'startDate': pd.to_datetime(date).strftime('%Y-%m-%d'), 'endDate': pd.to_datetime(date).strftime('%Y-%m-%d'), 'resampleFreq': 'daily'}
+        params = {'startDate': date_str, 'endDate': date_str, 'resampleFreq': 'daily'}
         resp = requests.get(url, headers=headers, params=params, timeout=10)
         resp.raise_for_status()
         data = resp.json()
@@ -456,6 +459,44 @@ def get_price_on_date(symbol, date, tiingo_api_key):
     except Exception:
         return np.nan
     return np.nan
+
+
+def impute_spikes(series, multiplier=2.9):
+    """Replace any value that is >= multiplier * previous_day with previous_day's value.
+    Returns a new Series.
+    """
+    try:
+        s = series.copy().astype(float)
+        prev = s.shift(1)
+        # avoid division by zero warnings; treat prev==0 as spike (will set to prev which is 0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = s / prev
+        mask = ratio >= float(multiplier)
+        s.loc[mask] = prev.loc[mask]
+        return s
+    except Exception:
+        return series
+
+
+def warm_up_price_cache(tickers, days=10, tiingo_api_key=None):
+    """Prefetch recent prices for the supplied tickers to populate the cached get_price_on_date results.
+    Limits to `days` business days ending today. This is best-effort and silent on errors.
+    """
+    if not tickers or tiingo_api_key is None:
+        return
+    try:
+        # use business days
+        dates = pd.bdate_range(end=datetime.date.today(), periods=days)
+        for sym in list(dict.fromkeys(tickers))[:50]:  # limit to first 50 tickers to avoid huge warming
+            for d in dates:
+                try:
+                    # call cached function to warm
+                    _ = get_price_on_date(sym, d.strftime('%Y-%m-%d'), tiingo_api_key)
+                except Exception:
+                    # ignore individual failures
+                    continue
+    except Exception:
+        return
 
 # --- Forecasting Helper Functions ---
 def get_significant_lags(series, alpha=0.15, nlags=None):
@@ -797,6 +838,14 @@ with tab1:
             perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=cash_balance)
             if perf_df is not None:
                 # UI controls for date range, normalization and extra metrics
+                # Warm-up price cache once per session for current holdings to speed diagnostics/scenarios
+                try:
+                    if not st.session_state.get('price_cache_warmed', False):
+                        holdings_list = portfolio_df['Ticker'].tolist() if not portfolio_df.empty else []
+                        warm_up_price_cache(holdings_list, days=10, tiingo_api_key=tiingo_api_key)
+                        st.session_state['price_cache_warmed'] = True
+                except Exception:
+                    pass
                 # Use safe defaults when perf_df has no rows
                 try:
                     min_date = perf_df.index.min().date() if not perf_df.empty else datetime.date.today()
@@ -806,10 +855,8 @@ with tab1:
                     max_date = datetime.date.today()
 
                 date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-                # Always show relative performance by default
+                # Always show real-dollar account value by scaling normalized series to the real ending account value
                 normalize = True
-                # Allow optional scaling of normalized series back to a real account-value anchor
-                scale_to_account = st.checkbox("Show scaled to real Account Value (dollars)", value=False, help="Scale the normalized series so the AccountValue's last point equals your current account value.")
                 show_metrics = st.checkbox("Show cumulative returns and drawdown", value=False)
 
                 # Normalize/validate date_range into start_dt/end_dt (always datetimes)
@@ -879,31 +926,38 @@ with tab1:
                     else:
                         plot_df_norm[col] = np.nan
 
-                # Optionally scale normalized series to match real AccountValue
-                plot_to_show = plot_df_norm
+                # Always scale normalized series to a real-dollar anchor so the chart shows approximate account values
+                plot_to_show = plot_df_norm.copy()
                 y_label = 'Index (Normalized to 100)'
-                if scale_to_account:
-                    # Determine anchor (prefer computed total_account_value, otherwise use last AccountValue in series)
-                    try:
-                        anchor_value = float(total_account_value) if 'total_account_value' in locals() else None
-                    except Exception:
-                        anchor_value = None
-                    try:
-                        if anchor_value is None and 'AccountValue' in abs_df.columns and not abs_df['AccountValue'].dropna().empty:
-                            anchor_value = float(abs_df['AccountValue'].dropna().iloc[-1])
-                    except Exception:
-                        anchor_value = None
 
-                    if anchor_value is not None and 'AccountValue' in plot_df_norm.columns and not plot_df_norm['AccountValue'].dropna().empty:
-                        norm_last = float(plot_df_norm['AccountValue'].dropna().iloc[-1])
-                        if norm_last != 0:
-                            scaling_factor = anchor_value / norm_last
-                            plot_to_show = plot_df_norm * scaling_factor
-                            y_label = f'Approx. Account Value (scaled to ${anchor_value:,.0f})'
-                        else:
-                            st.warning('Cannot scale: normalized AccountValue last value is zero.')
+                # Determine anchor (prefer computed total_account_value, otherwise use last AccountValue in abs_df)
+                try:
+                    anchor_value = float(total_account_value) if 'total_account_value' in locals() else None
+                except Exception:
+                    anchor_value = None
+                try:
+                    if anchor_value is None and 'AccountValue' in abs_df.columns and not abs_df['AccountValue'].dropna().empty:
+                        anchor_value = float(abs_df['AccountValue'].dropna().iloc[-1])
+                except Exception:
+                    anchor_value = None
+
+                # Impute spikes in AccountValue series before scaling
+                if 'AccountValue' in abs_df.columns:
+                    abs_df['AccountValue'] = impute_spikes(abs_df['AccountValue'], multiplier=2.9)
+                # Ensure AccountValue exists in plot_df_norm
+                if 'AccountValue' not in plot_df_norm.columns and 'AccountValue' in abs_df.columns:
+                    plot_df_norm['AccountValue'] = (abs_df['AccountValue'] / abs_df['AccountValue'].dropna().iloc[0]) * 100.0 if not abs_df['AccountValue'].dropna().empty else plot_df_norm.iloc[:, 0]
+
+                if anchor_value is not None and 'AccountValue' in plot_df_norm.columns and not plot_df_norm['AccountValue'].dropna().empty:
+                    norm_last = float(plot_df_norm['AccountValue'].dropna().iloc[-1])
+                    if norm_last != 0:
+                        scaling_factor = anchor_value / norm_last
+                        plot_to_show = plot_df_norm * scaling_factor
+                        y_label = f'Approx. Account Value (scaled to ${anchor_value:,.0f})'
                     else:
-                        st.warning('Cannot scale to account value: missing anchor/account value.')
+                        st.warning('Cannot scale: normalized AccountValue last value is zero.')
+                else:
+                    st.warning('Cannot scale to account value: missing anchor/account value.')
 
                 # Main performance chart
                 fig = go.Figure()
@@ -998,12 +1052,22 @@ with tab1:
                                         scen_plot = scenario_perf.copy()
                                         scen_plot = scen_plot.reindex(plot_window.index).ffill().bfill()
                                         if 'AccountValue' in scen_plot.columns and not scen_plot['AccountValue'].dropna().empty:
+                                            # Impute spikes in the scenario AccountValue as well
+                                            scen_plot['AccountValue'] = impute_spikes(scen_plot['AccountValue'], multiplier=2.9)
+                                            # Normalize scenario to 100 then scale using the same scaling_factor as main plot (if available)
                                             scen_norm = scen_plot.copy()
                                             first_val = scen_norm['AccountValue'].dropna().iloc[0]
                                             if first_val != 0:
                                                 scen_norm['AccountValue'] = (scen_norm['AccountValue'] / first_val) * 100.0
+                                                # Apply main scaling_factor if we computed it above; otherwise compute a local one
+                                                try:
+                                                    sf = scaling_factor
+                                                except Exception:
+                                                    norm_last_local = float(scen_norm['AccountValue'].dropna().iloc[-1]) if not scen_norm['AccountValue'].dropna().empty else None
+                                                    sf = (anchor_value / norm_last_local) if anchor_value is not None and norm_last_local and norm_last_local != 0 else 1.0
+                                                scen_scaled = scen_norm * sf
                                                 overlay_fig = fig
-                                                overlay_fig.add_trace(go.Scatter(x=scen_norm.index, y=scen_norm['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}'))
+                                                overlay_fig.add_trace(go.Scatter(x=scen_scaled.index, y=scen_scaled['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}'))
                                                 st.plotly_chart(overlay_fig, use_container_width=True)
                                             else:
                                                 st.warning('Scenario series has zero first value; cannot normalize for overlay.')
