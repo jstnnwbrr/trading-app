@@ -2,7 +2,7 @@
 # To run this app, save it as a python file (e.g., app.py) and run: streamlit run app.py
 # Make sure to set the environment variables before running.
 # Make sure to install all necessary libraries:
-# pip install streamlit pandas numpy scikit-learn statsmodels optuna yfinance requests matplotlib xlsxwriter openpyxl psycopg2-binary kaleido
+# pip install streamlit pandas numpy scikit-learn statsmodels optuna yfinance requests matplotlib xlsxwriter openpyxl psycopg2-binary plotly kaleido
 
 import streamlit as st
 import datetime
@@ -747,21 +747,45 @@ with tab1:
             perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=cash_balance)
             if perf_df is not None:
                 # UI controls for date range, normalization and extra metrics
-                min_date = perf_df.index.min().date()
-                max_date = perf_df.index.max().date()
+                # Use safe defaults when perf_df has no rows
+                try:
+                    min_date = perf_df.index.min().date() if not perf_df.empty else datetime.date.today()
+                    max_date = perf_df.index.max().date() if not perf_df.empty else datetime.date.today()
+                except Exception:
+                    min_date = datetime.date.today()
+                    max_date = datetime.date.today()
+
                 date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
                 normalize = st.checkbox("Normalize series to 100 (relative performance)", value=True)
                 show_metrics = st.checkbox("Show cumulative returns and drawdown", value=False)
 
-                # Filter perf_df by date range
-                start_dt, end_dt = date_range if isinstance(date_range, (list, tuple)) else (min_date, max_date)
-                plot_window = perf_df.loc[(perf_df.index.date >= start_dt) & (perf_df.index.date <= end_dt)].copy()
+                # Normalize/validate date_range into start_dt/end_dt (always datetimes)
+                if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+                    start_dt, end_dt = date_range
+                else:
+                    start_dt = date_range
+                    end_dt = date_range
+                start_dt = pd.to_datetime(start_dt).normalize()
+                end_dt = pd.to_datetime(end_dt).normalize()
 
-                # Allow user to pick benchmarks from sidebar multiselect
-                selected_indices = [col for col in ['DJIA', 'SP500', 'Nasdaq'] if col in plot_window.columns and col in st.session_state.get('indices_to_show', indices_to_show) if True]
+                # Build boolean mask in a vectorized way (avoid ambiguous truth values)
+                idx = pd.to_datetime(perf_df.index).normalize()
+                mask = (idx >= start_dt) & (idx <= end_dt)
+                plot_window = perf_df.loc[mask].copy()
+
+                # Allow user to pick benchmarks from sidebar multiselect; fall back to the sidebar variable
+                current_indices_selection = st.session_state.get('indices_to_show', indices_to_show) if isinstance(st.session_state.get('indices_to_show', indices_to_show), (list, tuple)) else indices_to_show
+                desired_indices = set(current_indices_selection)
+                available_indices = [col for col in ['DJIA', 'SP500', 'Nasdaq'] if col in plot_window.columns]
+                selected_indices = [col for col in available_indices if col in desired_indices]
+
                 cols_to_plot = ['AccountValue'] + selected_indices
+                # If AccountValue not present, try to fallback to first numeric column
+                if 'AccountValue' not in plot_window.columns and len(plot_window.columns) > 0:
+                    cols_to_plot[0] = plot_window.columns[0]
 
-                plot_df = plot_window[cols_to_plot].copy()
+                # Ensure columns exist before slicing
+                plot_df = plot_window[cols_to_plot].copy() if not plot_window.empty and all(c in plot_window.columns for c in cols_to_plot) else plot_window.copy()
                 abs_df = plot_df.copy()
 
                 # Summary metrics (AccountValue) — total return, annualized return, max drawdown
