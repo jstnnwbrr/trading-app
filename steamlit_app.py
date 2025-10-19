@@ -822,7 +822,7 @@ with tab1:
         portfolio_df.dropna(subset=['Current Price'], inplace=True)
         portfolio_df['Market Value'] = portfolio_df['Shares'] * portfolio_df['Current Price']
         portfolio_df['Avg Cost/Share'] = portfolio_df['Total Cost'] / portfolio_df['Shares']
-        portfolio_df['Unrealized P/L'] = portfolio_df['Market Value'] - portfolio_df['Total Cost']
+        portfolio_df['Unrealized Gain/Loss'] = portfolio_df['Market Value'] - portfolio_df['Total Cost']
         
         total_market_value = portfolio_df['Market Value'].sum()
         total_account_value = total_market_value + cash_balance
@@ -858,7 +858,7 @@ with tab1:
                 date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
                 # Always show real-dollar account value by scaling normalized series to the real ending account value
                 normalize = True
-                show_metrics = st.checkbox("Show cumulative returns and drawdown", value=False)
+                show_metrics = st.checkbox("Show cumulative returns", value=False)
 
                 # Normalize/validate date_range into start_dt/end_dt (always datetimes)
                 if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
@@ -890,8 +890,8 @@ with tab1:
                 # Reassign abs_df to use imputed plot_df so all downstream charts/exports use cleaned values
                 abs_df = plot_df.copy()
 
-                # Summary metrics (AccountValue) — total return, annualized return, max drawdown (recomputed after imputation)
-                summary_metrics = {'total_return_pct': None, 'annualized_return_pct': None, 'max_drawdown_pct': None}
+                # Summary metrics (AccountValue) — total return and annualized return (recomputed after imputation)
+                summary_metrics = {'total_return_pct': None, 'annualized_return_pct': None}
                 try:
                     if 'AccountValue' in abs_df.columns:
                         acct = abs_df['AccountValue'].dropna()
@@ -902,21 +902,16 @@ with tab1:
                             # trading days count
                             trading_days = len(acct) - 1
                             annualized = (1 + total_return) ** (252.0 / trading_days) - 1.0 if trading_days > 0 else 0.0
-                            running_max = acct.cummax()
-                            drawdowns = (acct / running_max) - 1.0
-                            max_dd = drawdowns.min()
                             summary_metrics['total_return_pct'] = round(total_return * 100.0, 2)
                             summary_metrics['annualized_return_pct'] = round(annualized * 100.0, 2)
-                            summary_metrics['max_drawdown_pct'] = round(max_dd * 100.0, 2)
                 except Exception:
                     pass
 
                 # Show summary metrics (use imputed values)
                 try:
-                    mcol1, mcol2, mcol3 = st.columns(3)
+                    mcol1, mcol2 = st.columns(2)
                     mcol1.metric("Total Return", f"{summary_metrics['total_return_pct'] if summary_metrics['total_return_pct'] is not None else 'N/A'}%")
                     mcol2.metric("Annualized Return", f"{summary_metrics['annualized_return_pct'] if summary_metrics['annualized_return_pct'] is not None else 'N/A'}%")
-                    mcol3.metric("Max Drawdown", f"{summary_metrics['max_drawdown_pct'] if summary_metrics['max_drawdown_pct'] is not None else 'N/A'}%")
                 except Exception:
                     pass
 
@@ -990,14 +985,14 @@ with tab1:
                 st.plotly_chart(fig, use_container_width=True)
 
                 # --- Diagnostic decomposition UI ---
-                with st.expander("🔎 Diagnose a date (contributors & scenario simulation)", expanded=False):
+                with st.expander("🔎 Analysis & Simulation", expanded=True):
                     diag_col1, diag_col2 = st.columns([1, 2])
                     with diag_col1:
                         try:
                             default_diag = plot_window.index.date[-1] if not plot_window.empty else max_date
                         except Exception:
                             default_diag = max_date
-                        diag_date = st.date_input('Pick a date to diagnose', value=default_diag)
+                        diag_date = st.date_input('Pick a historical trade date to analyze', value=default_diag)
                         diag_date = pd.to_datetime(diag_date).normalize()
                         exclude_ticker = st.text_input('Exclude ticker for scenario (leave blank for none)', '')
                         run_scenario = st.button('Run Exclude-Ticker Scenario')
@@ -1081,8 +1076,6 @@ with tab1:
                                         if ppos > 0:
                                             prev_plot_idx = plot_df.index[ppos - 1]
                                             prev_imputed = plot_df.loc[prev_plot_idx, 'AccountValue']
-                                    st.markdown('**Diagnostics (original vs imputed AccountValue)**')
-                                    st.write({'date': str(diag_date.date()), 'original': orig_val, 'imputed': imputed_val, 'prev_original': prev_orig, 'prev_imputed': prev_imputed})
                                 except Exception:
                                     pass
                         except Exception as e:
@@ -1128,7 +1121,29 @@ with tab1:
                                                 overlay_fig = fig
                                                 acct_color = color_map.get('AccountValue', '#6a0dad')
                                                 overlay_fig.add_trace(go.Scatter(x=scen_scaled.index, y=scen_scaled['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}', line=dict(color=acct_color, dash='dash')))
+                                                # Compute scenario summary metrics (total return, annualized return) using the imputed, un-normalized scen_plot
+                                                scen_metrics = {'total_return_pct': None, 'annualized_return_pct': None}
+                                                try:
+                                                    scen_acct = scen_plot['AccountValue'].dropna()
+                                                    if len(scen_acct) >= 2:
+                                                        s_start = float(scen_acct.iloc[0])
+                                                        s_end = float(scen_acct.iloc[-1])
+                                                        s_total_return = (s_end / s_start) - 1.0 if s_start != 0 else 0.0
+                                                        s_trading_days = len(scen_acct) - 1
+                                                        s_annualized = (1 + s_total_return) ** (252.0 / s_trading_days) - 1.0 if s_trading_days > 0 else 0.0
+                                                        scen_metrics['total_return_pct'] = round(s_total_return * 100.0, 2)
+                                                        scen_metrics['annualized_return_pct'] = round(s_annualized * 100.0, 2)
+                                                except Exception:
+                                                    pass
+
+                                                # Display the overlay and scenario metrics (match main dashboard metric style)
                                                 st.plotly_chart(overlay_fig, use_container_width=True)
+                                                try:
+                                                    sm1, sm2 = st.columns(2)
+                                                    sm1.metric(f"Scenario Total Return (w/o {ex or '(none)'})", f"{scen_metrics['total_return_pct'] if scen_metrics['total_return_pct'] is not None else 'N/A'}%")
+                                                    sm2.metric(f"Scenario Annualized Return (w/o {ex or '(none)'})", f"{scen_metrics['annualized_return_pct'] if scen_metrics['annualized_return_pct'] is not None else 'N/A'}%")
+                                                except Exception:
+                                                    pass
                                             else:
                                                 st.warning('Scenario series has zero first value; cannot normalize for overlay.')
                                         else:
@@ -1153,16 +1168,7 @@ with tab1:
                         except Exception:
                             pass
 
-                        # Drawdown sheet
-                        try:
-                            dd = abs_df.copy()
-                            for col in dd.columns:
-                                series = dd[col]
-                                running_max = series.cummax()
-                                dd[col] = (series / running_max - 1) * 100.0
-                            dd.to_excel(ew, sheet_name='Drawdown')
-                        except Exception:
-                            pass
+                        # Drawdown sheet removed per simplification request
 
                         # Insert main chart image if possible (best-effort)
                         try:
@@ -1179,7 +1185,7 @@ with tab1:
                     # If Excel export fails, ignore and continue
                     pass
 
-                # Additional metrics: cumulative returns and drawdown
+                # Additional metrics: cumulative returns
                 if show_metrics:
                     # Cumulative returns (%) from start
                     cret = abs_df.copy()
@@ -1193,18 +1199,7 @@ with tab1:
                     fig_cr.update_layout(title='Cumulative Return (%)', xaxis_title='Date', yaxis_title='Return %', template='plotly_white')
                     st.plotly_chart(fig_cr, use_container_width=True)
 
-                    # Drawdown (%)
-                    dd = abs_df.copy()
-                    for col in dd.columns:
-                        series = dd[col]
-                        running_max = series.cummax()
-                        dd[col] = (series / running_max - 1) * 100.0
-
-                    fig_dd = go.Figure()
-                    for col in dd.columns:
-                        fig_dd.add_trace(go.Scatter(x=dd.index, y=dd[col], mode='lines', name=col))
-                    fig_dd.update_layout(title='Drawdown (%)', xaxis_title='Date', yaxis_title='Drawdown %', template='plotly_white')
-                    st.plotly_chart(fig_dd, use_container_width=True)
+                    # Drawdown plotting removed per simplification request
         except Exception as e:
             st.warning(f"Could not render performance chart: {e}")
     else:
