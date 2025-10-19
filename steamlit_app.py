@@ -433,6 +433,30 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
     out = pd.DataFrame(account_values).set_index('Date')
     return out
 
+
+def get_price_on_date(symbol, date, tiingo_api_key):
+    """Fetch adjClose (or close) for a single symbol on a specific date using Tiingo.
+    Returns float or np.nan.
+    """
+    try:
+        throttle_request()
+        headers = {'Content-Type': 'application/json', 'Authorization': f'Token {tiingo_api_key}'}
+        url = f"https://api.tiingo.com/tiingo/daily/{symbol}/prices"
+        params = {'startDate': pd.to_datetime(date).strftime('%Y-%m-%d'), 'endDate': pd.to_datetime(date).strftime('%Y-%m-%d'), 'resampleFreq': 'daily'}
+        resp = requests.get(url, headers=headers, params=params, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        if not data:
+            return np.nan
+        # Tiingo returns list of day dicts
+        rec = data[-1]
+        for key in ('adjClose', 'close', 'last'):
+            if key in rec and rec[key] is not None:
+                return float(rec[key])
+    except Exception:
+        return np.nan
+    return np.nan
+
 # --- Forecasting Helper Functions ---
 def get_significant_lags(series, alpha=0.15, nlags=None):
     acf_values, confint_acf = sm.tsa.stattools.acf(series, alpha=alpha, nlags=nlags)
@@ -782,7 +806,10 @@ with tab1:
                     max_date = datetime.date.today()
 
                 date_range = st.date_input("Performance date range", value=(min_date, max_date), min_value=min_date, max_value=max_date)
-                normalize = st.checkbox("Normalize series to 100 (relative performance)", value=True)
+                # Always show relative performance by default
+                normalize = True
+                # Allow optional scaling of normalized series back to a real account-value anchor
+                scale_to_account = st.checkbox("Show scaled to real Account Value (dollars)", value=False, help="Scale the normalized series so the AccountValue's last point equals your current account value.")
                 show_metrics = st.checkbox("Show cumulative returns and drawdown", value=False)
 
                 # Normalize/validate date_range into start_dt/end_dt (always datetimes)
@@ -843,21 +870,147 @@ with tab1:
                 except Exception:
                     pass
 
-                if normalize:
-                    for col in plot_df.columns:
-                        first_valid = plot_df[col].dropna().iloc[0] if not plot_df[col].dropna().empty else np.nan
-                        if pd.notna(first_valid) and first_valid != 0:
-                            plot_df[col] = (plot_df[col] / first_valid) * 100.0
+                # Normalize (always on) into a separate DataFrame to preserve raw values
+                plot_df_norm = plot_df.copy()
+                for col in plot_df_norm.columns:
+                    first_valid = plot_df_norm[col].dropna().iloc[0] if not plot_df_norm[col].dropna().empty else np.nan
+                    if pd.notna(first_valid) and first_valid != 0:
+                        plot_df_norm[col] = (plot_df_norm[col] / first_valid) * 100.0
+                    else:
+                        plot_df_norm[col] = np.nan
+
+                # Optionally scale normalized series to match real AccountValue
+                plot_to_show = plot_df_norm
+                y_label = 'Index (Normalized to 100)'
+                if scale_to_account:
+                    # Determine anchor (prefer computed total_account_value, otherwise use last AccountValue in series)
+                    try:
+                        anchor_value = float(total_account_value) if 'total_account_value' in locals() else None
+                    except Exception:
+                        anchor_value = None
+                    try:
+                        if anchor_value is None and 'AccountValue' in abs_df.columns and not abs_df['AccountValue'].dropna().empty:
+                            anchor_value = float(abs_df['AccountValue'].dropna().iloc[-1])
+                    except Exception:
+                        anchor_value = None
+
+                    if anchor_value is not None and 'AccountValue' in plot_df_norm.columns and not plot_df_norm['AccountValue'].dropna().empty:
+                        norm_last = float(plot_df_norm['AccountValue'].dropna().iloc[-1])
+                        if norm_last != 0:
+                            scaling_factor = anchor_value / norm_last
+                            plot_to_show = plot_df_norm * scaling_factor
+                            y_label = f'Approx. Account Value (scaled to ${anchor_value:,.0f})'
                         else:
-                            plot_df[col] = np.nan
+                            st.warning('Cannot scale: normalized AccountValue last value is zero.')
+                    else:
+                        st.warning('Cannot scale to account value: missing anchor/account value.')
 
                 # Main performance chart
                 fig = go.Figure()
-                for col in plot_df.columns:
-                    fig.add_trace(go.Scatter(x=plot_df.index, y=plot_df[col], mode='lines', name=col))
-                y_label = 'Index (Normalized to 100)' if normalize else 'Value'
+                for col in plot_to_show.columns:
+                    fig.add_trace(go.Scatter(x=plot_to_show.index, y=plot_to_show[col], mode='lines', name=col))
                 fig.update_layout(title='Account Performance vs Major Indices', xaxis_title='Date', yaxis_title=y_label, template='plotly_white')
                 st.plotly_chart(fig, use_container_width=True)
+
+                # --- Diagnostic decomposition UI ---
+                with st.expander("🔎 Diagnose a date (contributors & scenario simulation)", expanded=False):
+                    diag_col1, diag_col2 = st.columns([1, 2])
+                    with diag_col1:
+                        try:
+                            default_diag = plot_window.index.date[-1] if not plot_window.empty else max_date
+                        except Exception:
+                            default_diag = max_date
+                        diag_date = st.date_input('Pick a date to diagnose', value=default_diag)
+                        diag_date = pd.to_datetime(diag_date).normalize()
+                        exclude_ticker = st.text_input('Exclude ticker for scenario (leave blank for none)', '')
+                        run_scenario = st.button('Run Exclude-Ticker Scenario')
+                    with diag_col2:
+                        st.write('Contributors on selected date')
+                        # Build decomposition table for the selected date
+                        try:
+                            trades_history = get_trade_history()
+                            if trades_history is None or trades_history.empty:
+                                st.info('No trade history available.')
+                            else:
+                                th = trades_history.copy()
+                                th['Date'] = pd.to_datetime(th['Date']).dt.tz_localize(None)
+                                th = th.sort_values('Date')
+                                # Display trades that occurred on or around the diagnosis date (±3 days)
+                                try:
+                                    start_window = diag_date - pd.Timedelta(days=3)
+                                    end_window = diag_date + pd.Timedelta(days=3)
+                                    trades_near = th[(th['Date'] >= start_window) & (th['Date'] <= end_window)].copy()
+                                    if not trades_near.empty:
+                                        trades_near_display = trades_near[['Date', 'Ticker', 'Type', 'Quantity', 'Price']].sort_values('Date', ascending=False)
+                                        st.write(f"Trades within ±3 days of {diag_date.date()}:")
+                                        st.dataframe(trades_near_display)
+                                    else:
+                                        st.info(f"No trades within ±3 days of {diag_date.date()}")
+                                except Exception:
+                                    # If diag_date is invalid or other error, just skip the nearby trades display
+                                    pass
+
+                                holdings_temp = {}
+                                for _, r in th.iterrows():
+                                    if r['Date'].date() <= diag_date.date():
+                                        sym = r['Ticker']
+                                        qty = int(r['Quantity'])
+                                        if r['Type'].lower() == 'buy':
+                                            holdings_temp[sym] = holdings_temp.get(sym, 0) + qty
+                                        else:
+                                            holdings_temp[sym] = holdings_temp.get(sym, 0) - qty
+                                holdings_list = [{'Ticker': k, 'Shares': v} for k, v in holdings_temp.items() if v != 0]
+                                if holdings_list:
+                                    contrib_rows = []
+                                    for row in holdings_list:
+                                        sym = row['Ticker']
+                                        shares = row['Shares']
+                                        px = get_price_on_date(sym, diag_date, tiingo_api_key)
+                                        contrib = shares * (px if not pd.isna(px) else 0.0)
+                                        contrib_rows.append({'Ticker': sym, 'Shares': shares, 'Price': px, 'Contribution': contrib})
+                                    contrib_df = pd.DataFrame(contrib_rows).sort_values('Contribution', ascending=False)
+                                    st.dataframe(contrib_df)
+                                else:
+                                    st.info('No holdings on that date.')
+                        except Exception as e:
+                            st.warning(f'Could not compute contributors: {e}')
+
+                    # Scenario: re-run a lean simulation excluding one ticker
+                    if run_scenario:
+                        try:
+                            original_trades = get_trade_history()
+                            if original_trades is None or original_trades.empty:
+                                st.info('No trades to simulate.')
+                            else:
+                                ex = exclude_ticker.strip().upper()
+                                if ex:
+                                    filtered = original_trades[original_trades['Ticker'].str.upper() != ex].copy()
+                                else:
+                                    filtered = original_trades.copy()
+                                if filtered.empty:
+                                    st.info('No trades remain after excluding that ticker.')
+                                else:
+                                    scenario_perf = compute_account_performance(filtered, tiingo_api_key, initial_cash=cash_balance)
+                                    if scenario_perf is None or scenario_perf.empty:
+                                        st.warning('Scenario simulation returned no data.')
+                                    else:
+                                        # align and normalize scenario for overlay
+                                        scen_plot = scenario_perf.copy()
+                                        scen_plot = scen_plot.reindex(plot_window.index).ffill().bfill()
+                                        if 'AccountValue' in scen_plot.columns and not scen_plot['AccountValue'].dropna().empty:
+                                            scen_norm = scen_plot.copy()
+                                            first_val = scen_norm['AccountValue'].dropna().iloc[0]
+                                            if first_val != 0:
+                                                scen_norm['AccountValue'] = (scen_norm['AccountValue'] / first_val) * 100.0
+                                                overlay_fig = fig
+                                                overlay_fig.add_trace(go.Scatter(x=scen_norm.index, y=scen_norm['AccountValue'], mode='lines', name=f'Scenario w/o {ex or "(none)"}'))
+                                                st.plotly_chart(overlay_fig, use_container_width=True)
+                                            else:
+                                                st.warning('Scenario series has zero first value; cannot normalize for overlay.')
+                                        else:
+                                            st.warning('Scenario AccountValue series missing; cannot overlay.')
+                        except Exception as e:
+                            st.warning(f'Error running scenario: {e}')
 
                 # Download performance as Excel with sheets and optional images
                 try:
