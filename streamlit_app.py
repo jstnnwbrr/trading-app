@@ -1419,6 +1419,6 @@ with tab3:
     # Show current trade history after optional updates
     trade_history_df = get_trade_history()
     if not trade_history_df.empty:
-        st.dataframe(trade_history_df, width='stretch')
+        st.dataframe(trade_history_df, width='stretch', hide_index=True)
     else:
         st.info("No trades have been made yet.")
