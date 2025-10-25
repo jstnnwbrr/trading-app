@@ -914,7 +914,7 @@ with tab1:
         col2.metric("Portfolio Value", f"${total_market_value:,.2f}")
         col3.metric("Cash Balance", f"${cash_balance:,.2f}")
         
-        st.dataframe(portfolio_df, width='stretch')
+        st.dataframe(portfolio_df, width='stretch',)
         # --- Account performance vs major indices ---
         try:
             trade_history = get_trade_history()
@@ -1384,7 +1384,7 @@ with tab3:
                 cleaned_df, initial_cash = clean_transaction_history(uploaded_file)
                 # Persist computed initial cash so portfolio calculations use it
                 st.session_state['initial_cash'] = float(initial_cash)
-                st.dataframe(cleaned_df.head(200), width='stretch')
+                st.dataframe(cleaned_df.head(200), width='stretch', hide_index=True)
             except Exception as e:
                 st.error(f"Failed to parse/clean uploaded file: {e}")
 
