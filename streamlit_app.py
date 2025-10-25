@@ -248,9 +248,87 @@ def get_trade_history():
             return pd.DataFrame(cur.fetchall(), columns=['Ticker', 'Type', 'Quantity', 'Price', 'Date'])
     return pd.DataFrame()
 
-def get_portfolio():
+
+def clean_transaction_history(uploaded_file):
+    """Read an E*TRADE transaction CSV (either a path or a file-like object) and
+    return a cleaned DataFrame ready for DB insertion and an initial cash balance.
+
+    This adapts the user-provided function to accept uploaded files from Streamlit.
+    """
+    # Read CSV from path or file-like
+    if isinstance(uploaded_file, str):
+        df = pd.read_csv(uploaded_file, skiprows=3)
+    else:
+        # streamlit file_uploader returns a BytesIO-like object
+        uploaded_file.seek(0)
+        df = pd.read_csv(uploaded_file, skiprows=3)
+
+    # Standardize column names and drop unneeded columns if present
+    df.rename(columns={'TransactionDate': 'trade_date', 'Symbol': 'ticker', 'Quantity': 'quantity', 'Price': 'price'}, inplace=True)
+    for col in ['TransactionType', 'SecurityType', 'Commission', 'Description']:
+        if col in df.columns:
+            try:
+                df.drop(columns=[col], inplace=True)
+            except Exception:
+                pass
+
+    df['trade_date'] = pd.to_datetime(df['trade_date'], utc=True, errors='coerce')
+    df['trade_type'] = df['quantity'].apply(lambda x: 'buy' if x > 0 else 'sell')
+    df['quantity'] = df['quantity'].abs()
+
+    # Defensive handling for Amount column and specific tickers/dates used to compute initial cash balance
+    amount_sum = df.loc[df['quantity'] == 0, 'Amount'].sum() if 'Amount' in df.columns else 0.0
+    sphy_sum_0402 = 0.0
+    sphy_sum_0409 = 0.0
+    msbnk_qty_sum = 0
+    try:
+        if 'SPHY' in df['ticker'].values:
+            sphy_sum_0402 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'quantity']).sum()
+            sphy_sum_0409 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'quantity']).sum()
+    except Exception:
+        pass
+    try:
+        if 'MSBNK' in df['ticker'].values and 'quantity' in df.columns:
+            msbnk_qty_sum = df.loc[df['ticker'] == 'MSBNK', 'quantity'].sum()
+    except Exception:
+        pass
+
+    initial_cash_balance = sphy_sum_0402 + sphy_sum_0409 + amount_sum + (msbnk_qty_sum if not pd.isna(msbnk_qty_sum) else 0)
+
+    # Continue cleaning: drop Amount if exists, remove unwanted tickers/zero-quantity rows
+    if 'Amount' in df.columns:
+        try:
+            df.drop(columns=['Amount'], inplace=True)
+        except Exception:
+            pass
+
+    df = df.loc[df['ticker'] != 'SPHY'] if 'ticker' in df.columns else df
+    df = df.loc[df['quantity'] != 0]
+    df = df.loc[df['ticker'] != 'MSBNK'] if 'ticker' in df.columns else df
+
+    df = df.sort_values(by=['trade_date','ticker'], ascending=True)
+    df.reset_index(drop=True, inplace=True)
+    df['id'] = df.index + 1
+    # keep columns in the expected order for insertion
+    keep_cols = [c for c in ['id', 'ticker', 'trade_type', 'quantity', 'price', 'trade_date'] if c in df.columns]
+    df = df[keep_cols]
+
+    # Format trade_date to the compact ISO style used previously (microseconds truncated to 5 digits)
+    if 'trade_date' in df.columns:
+        micro = df['trade_date'].dt.strftime('%f').where(df['trade_date'].notna(), '')
+        micro5 = micro.str[:5]
+        date_time_no_frac = df['trade_date'].dt.strftime('%Y-%m-%d %H:%M:%S').where(df['trade_date'].notna(), '')
+        df['trade_date_str'] = ''
+        mask = df['trade_date'].notna()
+        df.loc[mask, 'trade_date_str'] = date_time_no_frac.loc[mask] + '.' + micro5.loc[mask] + '+00'
+        df['trade_date'] = df['trade_date_str']
+        df.drop(columns=['trade_date_str'], inplace=True)
+
+    return df, float(initial_cash_balance)
+
+def get_portfolio(initial_cash_bal=52014.64):
     history = get_trade_history()
-    cash_balance = 52013.75  # Starting capital
+    cash_balance = initial_cash_bal  # Starting capital
     if history.empty:
         return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
     
@@ -815,7 +893,11 @@ tab1, tab2, tab3 = st.tabs(["📊 Portfolio Dashboard", "📈 Forecasting", "�
 
 with tab1:
     st.header("📊 Portfolio Dashboard")
-    portfolio_df, cash_balance = get_portfolio()
+    # Use initial cash from session if present (set when a CSV is uploaded and processed),
+    # otherwise fall back to the hard-coded default used elsewhere in the app.
+    initial_cash = st.session_state.get('initial_cash', 52014.64)
+
+    portfolio_df, cash_balance = get_portfolio(initial_cash)
 
     if not portfolio_df.empty:
         portfolio_df['Current Price'] = portfolio_df['Ticker'].apply(lambda x: get_current_price(x, tiingo_api_key))
@@ -1293,6 +1375,48 @@ with tab2:
 
 with tab3:
     st.header("📜 Trade History")
+    # CSV upload and DB replace UI
+    uploaded_file = st.file_uploader("Upload E*TRADE transaction CSV (export) to replace trade history", type=['csv'])
+    if uploaded_file is not None:
+        st.info(f"Uploaded file: {getattr(uploaded_file, 'name', 'uploaded CSV')}")
+        if st.button("Preview cleaned data"):
+            try:
+                cleaned_df, initial_cash = clean_transaction_history(uploaded_file)
+                # Persist computed initial cash so portfolio calculations use it
+                st.session_state['initial_cash'] = float(initial_cash)
+                st.dataframe(cleaned_df.head(200), width='stretch')
+            except Exception as e:
+                st.error(f"Failed to parse/clean uploaded file: {e}")
+
+        st.markdown("---")
+        st.markdown("### Replace trades table with uploaded file")
+        confirm = st.checkbox("I confirm I want to DELETE existing trades and replace them with the uploaded file")
+        if confirm:
+            if st.button("Replace trades table (DELETE & INSERT)"):
+                if not conn:
+                    st.error("Database connection not available. Cannot replace trades.")
+                else:
+                    try:
+                        cleaned_df, initial_cash = clean_transaction_history(uploaded_file)
+                        # Persist computed initial cash so portfolio calculations use it after replace
+                        st.session_state['initial_cash'] = float(initial_cash)
+                        with conn.cursor() as cur:
+                            # truncate and reset serials
+                            cur.execute("TRUNCATE TABLE trades RESTART IDENTITY CASCADE;")
+                            insert_stmt = "INSERT INTO trades (ticker, trade_type, quantity, price, trade_date) VALUES (%s, %s, %s, %s, %s)"
+                            for _, r in cleaned_df.iterrows():
+                                ticker = r.get('ticker')
+                                trade_type = r.get('trade_type')
+                                qty = int(r.get('quantity')) if not pd.isna(r.get('quantity')) else 0
+                                price = float(r.get('price')) if not pd.isna(r.get('price')) else 0.0
+                                trade_date = r.get('trade_date') if 'trade_date' in r.index else None
+                                cur.execute(insert_stmt, (ticker, trade_type, qty, round(price, 2), trade_date))
+                            conn.commit()
+                        st.success("Trades table replaced successfully.")
+                    except Exception as e:
+                        st.error(f"Failed to replace trades table: {e}")
+
+    # Show current trade history after optional updates
     trade_history_df = get_trade_history()
     if not trade_history_df.empty:
         st.dataframe(trade_history_df, width='stretch')
