@@ -747,7 +747,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             predicted_next_open = predicted_next_high = predicted_next_low = df['Close'].iloc[-1]
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
-    target_buy_price = round(np.mean([(0.75 * predicted_next_open) + (0.25 * predicted_next_low), predicted_next_high/1.01]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    target_buy_price = round(np.mean([(0.67 * predicted_next_open) + (0.33 * predicted_next_low), predicted_next_high/1.01]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
