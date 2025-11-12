@@ -747,7 +747,7 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             predicted_next_open = predicted_next_high = predicted_next_low = df['Close'].iloc[-1]
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
-    target_buy_price = round(np.mean([(0.67 * predicted_next_open) + (0.33 * predicted_next_low), predicted_next_high/1.01]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    target_buy_price = round(np.mean([(0.70 * predicted_next_open) + (0.30 * predicted_next_low), predicted_next_high/1.01]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
@@ -884,7 +884,7 @@ with st.sidebar:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
-    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APPN, AUR, BL, BTG, GLD, GLDM, GOOG, ICCM, IOVA, MJNA, PSLV, QID, QQQU, QUBT, RDDT, SGOL, SLV, SPXU, SQQQ, TQQQ, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS", height=100, help="Tickers you do not wish to buy...")
+    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APLS, APPN, AUR, BL, BTG, GLD, GLDM, GOOG, ICCM, IOVA, MJNA, PSLV, QID, QQQU, QUBT, RDDT, SGOL, SLV, SPXU, SQQQ, TQQQ, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
 
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
