@@ -813,6 +813,11 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         short_term_recommendation = 'avoid/sell'
         long_term_recommendation = 'avoid/sell'
 
+    # If price is extremely low (penny stock), avoid buying
+    if target_buy_price < 1.00:
+        short_term_recommendation = 'avoid/sell'
+        long_term_recommendation = 'avoid/sell'
+
     summary_df = pd.DataFrame({
         'ticker_symbol': [stock_name], 
         'short_term_direction': [short_term_direction], 
@@ -884,7 +889,7 @@ with st.sidebar:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
-    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APLS, APPN, AUR, BL, BTG, GLD, GLDM, GOOG, ICCM, IOVA, MJNA, PSLV, QID, QQQU, QUBT, RDDT, SGOL, SLV, SPXU, SQQQ, TQQQ, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
+    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APLS, APPN, AU, AUR, BITF, BL, BTBT, BTDR, BTG, GDX, GLD, GLDM, GOOG, ICCM, IOVA, JDST, LLC, MARA, MJNA, NGD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SLV, SPXU, SQQQ, SRM, TQQQ, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
 
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
