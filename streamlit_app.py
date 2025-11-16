@@ -947,7 +947,10 @@ with tab1:
         # --- Account performance vs major indices ---
         try:
             trade_history = get_trade_history()
-            perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=cash_balance)
+            # Use the initial cash from session state (set when CSV uploaded), or fall back to session's initial_cash value
+            # This should be the starting capital, NOT the current cash balance
+            perf_initial_cash = st.session_state.get('initial_cash', initial_cash)
+            perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=perf_initial_cash)
             if perf_df is not None:
                 # UI controls for date range, normalization and extra metrics
                 # Warm-up price cache once per session for current holdings to speed diagnostics/scenarios
