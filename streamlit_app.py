@@ -340,7 +340,7 @@ def get_portfolio(initial_cash_bal=52026.00):
     history = get_trade_history()
     cash_balance = initial_cash_bal  # Starting capital
     if history.empty:
-        return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
+        return pd.DataFrame(columns=['Ticker', 'Shares']), cash_balance
     
     portfolio = {}
     
@@ -355,23 +355,18 @@ def get_portfolio(initial_cash_bal=52026.00):
             price = float(price)
 
         if ticker not in portfolio:
-            portfolio[ticker] = {'shares': 0, 'cost': 0.0}
+            portfolio[ticker] = {'shares': 0.0}
         
         if trade_type == 'buy':
             portfolio[ticker]['shares'] += quantity
-            portfolio[ticker]['cost'] += quantity * price
             cash_balance -= quantity * price
         elif trade_type == 'sell':
-            # Reduce shares and cost proportionally to maintain correct average cost
-            if portfolio[ticker]['shares'] > 0:
-                avg_cost_per_share = portfolio[ticker]['cost'] / portfolio[ticker]['shares']
-                portfolio[ticker]['cost'] -= quantity * avg_cost_per_share
             portfolio[ticker]['shares'] -= quantity
             cash_balance += quantity * price
 
     # Filter out closed positions and create DataFrame
     portfolio_df = pd.DataFrame([
-        {'Ticker': t, 'Shares': p['shares'], 'Total Cost': p['cost']}
+        {'Ticker': t, 'Shares': p['shares']}
         for t, p in portfolio.items() if p['shares'] > 0.001 # Use tolerance for float precision
     ])
     
