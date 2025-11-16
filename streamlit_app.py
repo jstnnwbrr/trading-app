@@ -54,7 +54,7 @@ def create_trades_table():
                     id SERIAL PRIMARY KEY,
                     ticker VARCHAR(10) NOT NULL,
                     trade_type VARCHAR(4) NOT NULL,
-                    quantity INT NOT NULL,
+                    quantity NUMERIC(10, 3) NOT NULL,
                     price NUMERIC(10, 2) NOT NULL,
                     trade_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
@@ -338,48 +338,38 @@ def clean_transaction_history(uploaded_file):
 
 def get_portfolio(initial_cash_bal=52014.64):
     history = get_trade_history()
-    cash_balance = initial_cash_bal  # Starting capital
+    cash_balance = Decimal(initial_cash_bal)  # Use Decimal for precision
     if history.empty:
-        return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
-    
-    # Sort trades by date, then by type (buys before sells on same date) to avoid negative share counts
-    history_sorted = history.copy()
-    history_sorted['Date'] = pd.to_datetime(history_sorted['Date'])
-    # Create sort key: buy=0 (sorts first), sell=1 (sorts second)
-    history_sorted['_sort_type'] = (history_sorted['Type'] == 'sell').astype(int)
-    history_sorted = history_sorted.sort_values(['Date', '_sort_type']).drop('_sort_type', axis=1)
-    
+        return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), float(cash_balance)
+
     portfolio = {}
-    
+
     # Calculate portfolio holdings
-    for _, row in history_sorted.iterrows():
-        ticker, trade_type, quantity, price = row['Ticker'], row['Type'], row['Quantity'], row['Price']
-        
-        if isinstance(price, Decimal):
-            price = float(price)
+    for _, row in history.iterrows():
+        ticker, trade_type, quantity, price = row['Ticker'], row['Type'], Decimal(row['Quantity']), Decimal(row['Price'])
 
         if ticker not in portfolio:
-            portfolio[ticker] = {'shares': 0, 'cost': 0.0}
-        
+            portfolio[ticker] = {'shares': Decimal(0), 'cost': Decimal(0)}
+
         if trade_type == 'buy':
             portfolio[ticker]['shares'] += quantity
             portfolio[ticker]['cost'] += quantity * price
             cash_balance -= quantity * price
         elif trade_type == 'sell':
-            # Reduce shares and cost proportionally to maintain correct average cost
             if portfolio[ticker]['shares'] > 0:
                 avg_cost_per_share = portfolio[ticker]['cost'] / portfolio[ticker]['shares']
-                portfolio[ticker]['cost'] -= quantity * avg_cost_per_share
-            portfolio[ticker]['shares'] -= quantity
-            cash_balance += quantity * price
+                sell_quantity = min(quantity, portfolio[ticker]['shares'])  # Prevent overselling
+                portfolio[ticker]['cost'] -= sell_quantity * avg_cost_per_share
+                portfolio[ticker]['shares'] -= sell_quantity
+                cash_balance += sell_quantity * price
 
-    # Filter out closed positions and create DataFrame
+    # Filter to only positions with net positive shares
     portfolio_df = pd.DataFrame([
-        {'Ticker': t, 'Shares': p['shares'], 'Total Cost': p['cost']}
-        for t, p in portfolio.items() if p['shares'] > 0.001 # Use tolerance for float precision
+        {'Ticker': t, 'Shares': float(p['shares']), 'Total Cost': float(p['cost'])}
+        for t, p in portfolio.items() if p['shares'] > Decimal('0.001')  # Use Decimal for precision
     ])
-    
-    return portfolio_df, cash_balance
+
+    return portfolio_df, float(cash_balance)
 
 
 @st.cache_data(ttl=3600)
@@ -492,7 +482,7 @@ def compute_account_performance(trades_df, tiingo_api_key, initial_cash=100000.0
         while trade_idx < len(trade_iter) and pd.to_datetime(trade_iter[trade_idx]['Date']).date() <= current_date.date():
             tr = trade_iter[trade_idx]
             sym = tr['Ticker']
-            qty = int(tr['Quantity'])
+            qty = float(tr['Quantity'])
             price = float(tr['Price'])
             if tr['Type'].lower() == 'buy':
                 holdings[sym] = holdings.get(sym, 0) + qty
@@ -955,7 +945,6 @@ with tab1:
         try:
             trade_history = get_trade_history()
             # Use the initial cash from session state (set when CSV uploaded), or fall back to session's initial_cash value
-            # This should be the starting capital, NOT the current cash balance
             perf_initial_cash = st.session_state.get('initial_cash', initial_cash)
             perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=perf_initial_cash)
             if perf_df is not None:
@@ -1146,7 +1135,7 @@ with tab1:
                                 for _, r in th.iterrows():
                                     if r['Date'].date() <= diag_date.date():
                                         sym = r['Ticker']
-                                        qty = int(r['Quantity'])
+                                        qty = float(r['Quantity'])
                                         if r['Type'].lower() == 'buy':
                                             holdings_temp[sym] = holdings_temp.get(sym, 0) + qty
                                         else:
@@ -1446,7 +1435,7 @@ with tab3:
                             for _, r in cleaned_df.iterrows():
                                 ticker = r.get('ticker')
                                 trade_type = r.get('trade_type')
-                                qty = int(r.get('quantity')) if not pd.isna(r.get('quantity')) else 0
+                                qty = float(r.get('quantity')) if not pd.isna(r.get('quantity')) else 0.0
                                 price = float(r.get('price')) if not pd.isna(r.get('price')) else 0.0
                                 trade_date = r.get('trade_date') if 'trade_date' in r.index else None
                                 cur.execute(insert_stmt, (ticker, trade_type, qty, round(price, 2), trade_date))
