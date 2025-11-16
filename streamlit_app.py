@@ -272,6 +272,7 @@ def clean_transaction_history(uploaded_file):
             except Exception:
                 pass
 
+    df['quantity'] = df['quantity'].astype(float)
     df['trade_date'] = pd.to_datetime(df['trade_date'], utc=True, errors='coerce')
     df['trade_type'] = df['quantity'].apply(lambda x: 'buy' if x > 0 else 'sell')
     df['quantity'] = df['quantity'].abs()
@@ -283,7 +284,7 @@ def clean_transaction_history(uploaded_file):
         try:
             # Amount column contains actual cash values for cash transactions (zero quantity)
             # and for dividend/fee/margin interest transactions
-            cash_rows = df[df['quantity'] == 0]
+            cash_rows = df[df['quantity'] == 0.0]
             if not cash_rows.empty and 'Amount' in cash_rows.columns:
                 initial_cash_balance = float(cash_rows['Amount'].sum())
             st.info(f"Detected cash balance from Amount column: ${initial_cash_balance:,.2f}")
