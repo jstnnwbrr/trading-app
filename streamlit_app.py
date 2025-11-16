@@ -287,7 +287,6 @@ def clean_transaction_history(uploaded_file):
             cash_rows = df[df['quantity'] == 0.0]
             if not cash_rows.empty and 'Amount' in cash_rows.columns:
                 initial_cash_balance = float(cash_rows['Amount'].sum())
-            st.info(f"Detected cash balance from Amount column: ${initial_cash_balance:,.2f}")
         except Exception as e:
             st.warning(f"Could not extract initial cash balance from Amount column: {e}")
     
@@ -312,7 +311,7 @@ def clean_transaction_history(uploaded_file):
             pass
 
     df = df.loc[df['ticker'] != 'SPHY'] if 'ticker' in df.columns else df
-    df = df.loc[df['quantity'] != 0]
+    df = df.loc[df['quantity'] != 0.0]
     df = df.loc[df['ticker'] != 'MSBNK'] if 'ticker' in df.columns else df
 
     df = df.sort_values(by=['trade_date','ticker'], ascending=True)
