@@ -348,6 +348,9 @@ def get_portfolio(initial_cash_bal=52026.00):
     for _, row in history.iterrows():
         ticker, trade_type, quantity, price = row['Ticker'], row['Type'], row['Quantity'], row['Price']
         
+        if isinstance(quantity, Decimal):
+            quantity = float(quantity)
+
         if isinstance(price, Decimal):
             price = float(price)
 
