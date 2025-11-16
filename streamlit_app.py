@@ -342,10 +342,17 @@ def get_portfolio(initial_cash_bal=52014.64):
     if history.empty:
         return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
     
+    # Sort trades by date, then by type (buys before sells on same date) to avoid negative share counts
+    history_sorted = history.copy()
+    history_sorted['Date'] = pd.to_datetime(history_sorted['Date'])
+    # Create sort key: buy=0 (sorts first), sell=1 (sorts second)
+    history_sorted['_sort_type'] = (history_sorted['Type'] == 'sell').astype(int)
+    history_sorted = history_sorted.sort_values(['Date', '_sort_type']).drop('_sort_type', axis=1)
+    
     portfolio = {}
     
     # Calculate portfolio holdings
-    for _, row in history.iterrows():
+    for _, row in history_sorted.iterrows():
         ticker, trade_type, quantity, price = row['Ticker'], row['Type'], row['Quantity'], row['Price']
         
         if isinstance(price, Decimal):
