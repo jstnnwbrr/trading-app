@@ -1209,7 +1209,7 @@ with tab1:
                                 if filtered.empty:
                                     st.info('No trades remain after excluding that ticker.')
                                 else:
-                                    scenario_perf = compute_account_performance(filtered, tiingo_api_key, initial_cash=cash_balance)
+                                    scenario_perf = compute_account_performance(filtered, tiingo_api_key, initial_cash=perf_initial_cash)
                                     if scenario_perf is None or scenario_perf.empty:
                                         st.warning('Scenario simulation returned no data.')
                                     else:
