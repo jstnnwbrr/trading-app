@@ -244,7 +244,7 @@ def execute_trade(ticker, trade_type, quantity, price):
 def get_trade_history():
     if conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT ticker, trade_type, quantity, price, trade_date FROM trades ORDER BY trade_date DESC")
+            cur.execute("SELECT ticker, trade_type, quantity, price, trade_date FROM trades ORDER BY trade_date ASC")
             return pd.DataFrame(cur.fetchall(), columns=['Ticker', 'Type', 'Quantity', 'Price', 'Date'])
     return pd.DataFrame()
 
