@@ -54,7 +54,7 @@ def create_trades_table():
                     id SERIAL PRIMARY KEY,
                     ticker VARCHAR(10) NOT NULL,
                     trade_type VARCHAR(4) NOT NULL,
-                    quantity NUMERIC(10, 3) NOT NULL,
+                    quantity NUMERIC(10, 2) NOT NULL,
                     price NUMERIC(10, 2) NOT NULL,
                     trade_date TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
                 );
@@ -336,40 +336,43 @@ def clean_transaction_history(uploaded_file):
 
     return df, float(initial_cash_balance)
 
-def get_portfolio(initial_cash_bal=52014.64):
+def get_portfolio(initial_cash_bal=52026.00):
     history = get_trade_history()
-    cash_balance = Decimal(initial_cash_bal)  # Use Decimal for precision
+    cash_balance = initial_cash_bal  # Starting capital
     if history.empty:
-        return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), float(cash_balance)
-
+        return pd.DataFrame(columns=['Ticker', 'Shares', 'Total Cost']), cash_balance
+    
     portfolio = {}
-
+    
     # Calculate portfolio holdings
     for _, row in history.iterrows():
-        ticker, trade_type, quantity, price = row['Ticker'], row['Type'], Decimal(row['Quantity']), Decimal(row['Price'])
+        ticker, trade_type, quantity, price = row['Ticker'], row['Type'], row['Quantity'], row['Price']
+        
+        if isinstance(price, Decimal):
+            price = float(price)
 
         if ticker not in portfolio:
-            portfolio[ticker] = {'shares': Decimal(0), 'cost': Decimal(0)}
-
+            portfolio[ticker] = {'shares': 0, 'cost': 0.0}
+        
         if trade_type == 'buy':
             portfolio[ticker]['shares'] += quantity
             portfolio[ticker]['cost'] += quantity * price
             cash_balance -= quantity * price
         elif trade_type == 'sell':
+            # Reduce shares and cost proportionally to maintain correct average cost
             if portfolio[ticker]['shares'] > 0:
                 avg_cost_per_share = portfolio[ticker]['cost'] / portfolio[ticker]['shares']
-                sell_quantity = min(quantity, portfolio[ticker]['shares'])  # Prevent overselling
-                portfolio[ticker]['cost'] -= sell_quantity * avg_cost_per_share
-                portfolio[ticker]['shares'] -= sell_quantity
-                cash_balance += sell_quantity * price
+                portfolio[ticker]['cost'] -= quantity * avg_cost_per_share
+            portfolio[ticker]['shares'] -= quantity
+            cash_balance += quantity * price
 
-    # Filter to only positions with net positive shares
+    # Filter out closed positions and create DataFrame
     portfolio_df = pd.DataFrame([
-        {'Ticker': t, 'Shares': float(p['shares']), 'Total Cost': float(p['cost'])}
-        for t, p in portfolio.items() if p['shares'] > Decimal('0.001')  # Use Decimal for precision
+        {'Ticker': t, 'Shares': p['shares'], 'Total Cost': p['cost']}
+        for t, p in portfolio.items() if p['shares'] > 0.001 # Use tolerance for float precision
     ])
-
-    return portfolio_df, float(cash_balance)
+    
+    return portfolio_df, cash_balance
 
 
 @st.cache_data(ttl=3600)
@@ -921,7 +924,7 @@ with tab1:
     st.header("📊 Portfolio Dashboard")
     # Use initial cash from session if present (set when a CSV is uploaded and processed),
     # otherwise fall back to the hard-coded default used elsewhere in the app.
-    initial_cash = st.session_state.get('initial_cash', 52014.64)
+    initial_cash = st.session_state.get('initial_cash', 52026.00)
 
     portfolio_df, cash_balance = get_portfolio(initial_cash)
 
@@ -929,8 +932,6 @@ with tab1:
         portfolio_df['Current Price'] = portfolio_df['Ticker'].apply(lambda x: get_current_price(x, tiingo_api_key))
         portfolio_df.dropna(subset=['Current Price'], inplace=True)
         portfolio_df['Market Value'] = portfolio_df['Shares'] * portfolio_df['Current Price']
-        portfolio_df['Avg Cost/Share'] = portfolio_df['Total Cost'] / portfolio_df['Shares']
-        portfolio_df['Unrealized Gain/Loss'] = portfolio_df['Market Value'] - portfolio_df['Total Cost']
         
         total_market_value = portfolio_df['Market Value'].sum()
         total_account_value = total_market_value + cash_balance
@@ -945,6 +946,7 @@ with tab1:
         try:
             trade_history = get_trade_history()
             # Use the initial cash from session state (set when CSV uploaded), or fall back to session's initial_cash value
+            # This should be the starting capital, NOT the current cash balance
             perf_initial_cash = st.session_state.get('initial_cash', initial_cash)
             perf_df = compute_account_performance(trade_history, tiingo_api_key, initial_cash=perf_initial_cash)
             if perf_df is not None:
