@@ -276,24 +276,32 @@ def clean_transaction_history(uploaded_file):
     df['trade_type'] = df['quantity'].apply(lambda x: 'buy' if x > 0 else 'sell')
     df['quantity'] = df['quantity'].abs()
 
-    # Defensive handling for Amount column and specific tickers/dates used to compute initial cash balance
-    amount_sum = df.loc[df['quantity'] == 0, 'Amount'].sum() if 'Amount' in df.columns else 0.0
-    sphy_sum_0402 = 0.0
-    sphy_sum_0409 = 0.0
-    msbnk_qty_sum = 0
-    try:
-        if 'SPHY' in df['ticker'].values:
-            sphy_sum_0402 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'quantity']).sum()
-            sphy_sum_0409 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'quantity']).sum()
-    except Exception:
-        pass
-    try:
-        if 'MSBNK' in df['ticker'].values and 'quantity' in df.columns:
-            msbnk_qty_sum = df.loc[df['ticker'] == 'MSBNK', 'quantity'].sum()
-    except Exception:
-        pass
-
-    initial_cash_balance = sphy_sum_0402 + sphy_sum_0409 + amount_sum + (msbnk_qty_sum if not pd.isna(msbnk_qty_sum) else 0)
+    # Calculate initial cash balance from Amount column (if present)
+    # This represents cash deposits, dividends, and other non-trade cash movements
+    initial_cash_balance = 0.0
+    if 'Amount' in df.columns:
+        try:
+            # Amount column contains actual cash values for cash transactions (zero quantity)
+            # and for dividend/fee/margin interest transactions
+            cash_rows = df[df['quantity'] == 0]
+            if not cash_rows.empty and 'Amount' in cash_rows.columns:
+                initial_cash_balance = float(cash_rows['Amount'].sum())
+            st.info(f"Detected cash balance from Amount column: ${initial_cash_balance:,.2f}")
+        except Exception as e:
+            st.warning(f"Could not extract initial cash balance from Amount column: {e}")
+    
+    # Fallback: try to extract from specific tickers (legacy support for personal patterns)
+    # These should only be used if Amount column is empty or zero
+    if initial_cash_balance == 0.0:
+        try:
+            sphy_sum_0402 = 0.0
+            sphy_sum_0409 = 0.0
+            if 'SPHY' in df['ticker'].values:
+                sphy_sum_0402 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-02'), 'quantity']).sum()
+                sphy_sum_0409 = (df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'price'] * df.loc[(df['ticker'] == 'SPHY') & (df['trade_date'].dt.strftime('%Y-%m-%d') == '2025-04-09'), 'quantity']).sum()
+            initial_cash_balance = sphy_sum_0402 + sphy_sum_0409
+        except Exception:
+            pass
 
     # Continue cleaning: drop Amount if exists, remove unwanted tickers/zero-quantity rows
     if 'Amount' in df.columns:
