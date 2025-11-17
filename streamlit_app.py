@@ -160,12 +160,20 @@ def get_top_200_active_tickers(tiingo_api_key):
     try:
         response = requests.get(url, headers=headers)
         response.raise_for_status()
-        df = pd.DataFrame(response.json())
+        data = response.json()
+
+        df = pd.DataFrame(data)
         df = df.sort_values(by="volume", ascending=False)
-        return parse_and_clean_tickers(df['ticker'].head(200).tolist())
+
+        top_tickers = ['SPY']  # Always include SPY for market context
+        top_tickers += df['ticker'].head(200).tolist()
+        top_tickers = parse_and_clean_tickers(top_tickers)
+        return top_tickers
+
     except Exception as e:
         st.warning(f"Failed to fetch top active tickers: {e}")
-        return ["AAPL", "MSFT", "GOOG", "AMZN"]
+        # Fallback default
+        return ["SPY", "AAPL", "MSFT", "GOOG", "AMZN"]
 
 @st.cache_data(ttl=300) # Cache for 5 minutes
 def get_current_price(stock_name, tiingo_api_key):
@@ -726,7 +734,7 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict, s
         st.error(f"Error during rolling forecast: {e}")
         return [], df
 
-def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df=None):
+def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df=None, spy_recommendation=None):
     rolling_forecast_df = pd.DataFrame({
         'Date': pd.date_range(start=df.index[-1], periods=n_periods + 1, freq='B')[1:],
         'Predicted_Close': rolling_predictions})
@@ -776,11 +784,8 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     if stock_name == 'SPY':
         target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
     else:
-        # Evaluate SPY recommendation
-        spy_recommendation = 'avoid/sell'  # Default to avoid/sell if SPY data is unavailable
-        if 'SPY' in summary_df['ticker_symbol'].values:
-            spy_recommendation = summary_df.loc[summary_df['ticker_symbol'] == 'SPY', 'short_term_recommendation'].values[0]
-
+        # Retrieve SPY recommendation from session state
+        spy_recommendation = st.session_state.get('spy_recommendation', 'avoid/sell')
         if spy_recommendation == 'buy':
             target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
         else:
@@ -860,6 +865,12 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         short_term_recommendation = 'avoid/sell'
         long_term_recommendation = 'avoid/sell'
 
+    # Check if the ticker being evaluated is SPY - store its recommendation for market context
+    if stock_name == 'SPY':
+        # Store SPY recommendation in session state
+        st.session_state['spy_recommendation'] = short_term_recommendation
+
+    # Create summary_df after all calculations
     summary_df = pd.DataFrame({
         'ticker_symbol': [stock_name], 
         'short_term_direction': [short_term_direction], 
@@ -928,7 +939,7 @@ with st.sidebar:
         default_tickers = get_top_200_active_tickers(tiingo_api_key)
         default_stocks = ", ".join(default_tickers)
     else:
-        default_stocks = "AAPL, MSFT, GOOG, AMZN"
+        default_stocks = "SPY, AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
     do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APLS, APPN, AU, AUR, BITF, BL, BTBT, BTDR, BTG, DNN, GDX, GLD, GLDM, GOOG, ICCM, IOVA, JDST, LLC, MARA, MJNA, NGD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SLV, SOXL, SPXU, SQQQ, SRM, TQQQ, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
@@ -1327,7 +1338,8 @@ with tab1:
 with tab2:
     st.header("📈 Forecasting Tool")
     if st.button("🚀 Run Forecast"):
-        stock_list = parse_and_clean_tickers(stock_list_str)
+        stock_list = ['SPY']  # Always include SPY for market context
+        stock_list += parse_and_clean_tickers(stock_list_str)
         do_not_buy_list = parse_and_clean_tickers(do_not_buy_list_str) if do_not_buy_list_str else []
         do_not_buy_list = [ticker.strip().upper() for ticker in do_not_buy_list if ticker.strip()]
         stock_list = [ticker for ticker in stock_list if ticker not in do_not_buy_list]
@@ -1348,6 +1360,12 @@ with tab2:
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+
+                # --- Ensure SPY is processed first ---
+                if 'SPY' in stock_list:
+                    stock_list.remove('SPY')
+                    stock_list.insert(0, 'SPY')
+
                 for stock_name in stock_list:
                     st.subheader(f"Processing: {stock_name}")
                     
