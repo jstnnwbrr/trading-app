@@ -133,13 +133,24 @@ def parse_and_clean_tickers(input_data):
         text_data = ' '.join(map(str, input_data))
     else:
         text_data = str(input_data)
+
+    # Step 1: Clean split of all tokens
     tokens = re.split(r'[\s,;\t\n]+', text_data)
+    
+    # Step 2: Keep only short uppercase strings that are likely tickers (1–5 chars, all caps)
     cleaned_tickers = [
         token.strip().upper() for token in tokens
         if re.fullmatch(r'[A-Z]{1,5}', token.strip())
     ]
+    
+    # Step 3: Remove duplicates while preserving order
     seen = set()
-    unique_tickers = [t for t in cleaned_tickers if not (t in seen or seen.add(t))]
+    unique_tickers = ['SPY'] # Always include SPY as a benchmark
+    for ticker in cleaned_tickers:
+        if ticker not in seen:
+            seen.add(ticker)
+            unique_tickers.append(ticker)
+
     return unique_tickers
 
 @st.cache_data(ttl=3600)
@@ -761,7 +772,20 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
         predicted_next_high = max(predicted_next_high, predicted_next_open, predicted_next_low)
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
-    target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    # Check if the ticker being evaluated is SPY - we'll use this as a proxy for short-term market conditions and whether to weight slightly more bullish or bearish
+    if stock_name == 'SPY':
+        target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    else:
+        # Evaluate SPY recommendation
+        spy_recommendation = 'avoid/sell'  # Default to avoid/sell if SPY data is unavailable
+        if 'SPY' in summary_df['ticker_symbol'].values:
+            spy_recommendation = summary_df.loc[summary_df['ticker_symbol'] == 'SPY', 'short_term_recommendation'].values[0]
+
+        if spy_recommendation == 'buy':
+            target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+        else:
+            target_buy_price = round(0.25 * predicted_next_high + 0.75 * predicted_next_low, 2) if predicted_next_high and predicted_next_low else df['Close'].iloc[-1]
+
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     predicted_return = ((target_return_price / target_buy_price) - 1) if target_buy_price > 0 else 0
