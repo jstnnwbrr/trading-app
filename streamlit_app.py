@@ -145,7 +145,7 @@ def parse_and_clean_tickers(input_data):
     
     # Step 3: Remove duplicates while preserving order
     seen = set()
-    unique_tickers = ['SPY'] # Always include SPY as a benchmark
+    unique_tickers = []
     for ticker in cleaned_tickers:
         if ticker not in seen:
             seen.add(ticker)
