@@ -734,7 +734,7 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict, s
         st.error(f"Error during rolling forecast: {e}")
         return [], df
 
-def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df=None, spy_recommendation=None):
+def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df=None, spy_open_direction=None):
     rolling_forecast_df = pd.DataFrame({
         'Date': pd.date_range(start=df.index[-1], periods=n_periods + 1, freq='B')[1:],
         'Predicted_Close': rolling_predictions})
@@ -781,15 +781,25 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
 
     # Calculate short-term buy/sell targets, predicted return, and recommendations
     # Check if the ticker being evaluated is SPY - we'll use this as a proxy for short-term market conditions and whether to weight slightly more bullish or bearish
-    if stock_name == 'SPY':
-        target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
+    if stock_name == 'SPY' and predicted_next_open is not None and df['Close'].iloc[-1] is not None:
+        if predicted_next_open > df['Close'].iloc[-1]:
+            spy_open_direction = 'up'
+        elif predicted_next_open < df['Close'].iloc[-1]:
+            spy_open_direction = 'down'
+        else:
+            spy_open_direction = 'flat'
+        # Store SPY predicted open direction in session state
+        st.session_state['spy_open_direction'] = spy_open_direction
     else:
         # Retrieve SPY recommendation from session state
-        spy_recommendation = st.session_state.get('spy_recommendation', 'avoid/sell')
-        if spy_recommendation == 'buy':
-            target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2) if predicted_next_open != 0.01 else df['Close'].iloc[-1]
-        else:
-            target_buy_price = round(0.25 * predicted_next_high + 0.75 * predicted_next_low, 2) if predicted_next_high and predicted_next_low else df['Close'].iloc[-1]
+        spy_open_direction = st.session_state.get('spy_open_direction', 'avoid/sell')
+    
+    if spy_open_direction == 'up':
+        target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2) if predicted_next_open != 0.01 and predicted_next_low else df['Close'].iloc[-1]
+    elif spy_open_direction == 'down':
+        target_buy_price = round(0.25 * predicted_next_open + 0.75 * predicted_next_low, 2) if predicted_next_open and predicted_next_low else df['Close'].iloc[-1]
+    else:
+        target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2) if predicted_next_open and predicted_next_low else df['Close'].iloc[-1]
 
     target_sell_price = round(np.mean([predicted_next_open, predicted_next_high]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
     target_return_price = round(np.mean([target_sell_price, predicted_avg_3_days]), 2) if predicted_next_open and predicted_next_high else df['Close'].iloc[-1]
@@ -864,11 +874,6 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
     if target_buy_price < 1.00:
         short_term_recommendation = 'avoid/sell'
         long_term_recommendation = 'avoid/sell'
-
-    # Check if the ticker being evaluated is SPY - store its recommendation for market context
-    if stock_name == 'SPY':
-        # Store SPY recommendation in session state
-        st.session_state['spy_recommendation'] = short_term_recommendation
 
     # Create summary_df after all calculations
     summary_df = pd.DataFrame({
