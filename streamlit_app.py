@@ -168,7 +168,15 @@ def get_top_200_active_tickers(tiingo_api_key):
         top_tickers = ['SPY']  # Always include SPY for market context
         top_tickers += df['ticker'].head(200).tolist()
         top_tickers = parse_and_clean_tickers(top_tickers)
-        return top_tickers
+        
+        # Ensure that 'SPY' wasn't duplicated
+        unique_seen = set()
+        unique_top_tickers = []
+        for ticker in top_tickers:
+            if ticker not in unique_seen:
+                unique_seen.add(ticker)
+                unique_top_tickers.append(ticker)
+        return unique_top_tickers
 
     except Exception as e:
         st.warning(f"Failed to fetch top active tickers: {e}")
@@ -1345,10 +1353,22 @@ with tab2:
     if st.button("🚀 Run Forecast"):
         stock_list = ['SPY']  # Always include SPY for market context
         stock_list += parse_and_clean_tickers(stock_list_str)
+        unique_stock_list = []
+        unique_temp_set = set()
+        for ticker in stock_list:
+            if ticker not in unique_temp_set:
+                unique_temp_set.add(ticker)
+                unique_stock_list.append(ticker)
+
+        del ticker
+
         do_not_buy_list = parse_and_clean_tickers(do_not_buy_list_str) if do_not_buy_list_str else []
         do_not_buy_list = [ticker.strip().upper() for ticker in do_not_buy_list if ticker.strip()]
-        stock_list = [ticker for ticker in stock_list if ticker not in do_not_buy_list]
+        stock_list = []
+        stock_list = [ticker for ticker in unique_stock_list if ticker not in do_not_buy_list]
         
+        del unique_stock_list, unique_temp_set
+
         if not tiingo_api_key:
             st.error("`TIINGO_API_KEY` is not set. Please configure it in your secrets.")
         elif not stock_list:
