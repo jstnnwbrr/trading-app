@@ -12,3 +12,5 @@ openpyxl
 psycopg2-binary
 plotly
 kaleido
+nltk
+tiingo
