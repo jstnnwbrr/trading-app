@@ -1268,7 +1268,7 @@ with st.sidebar:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
-    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)",  "AI, APLS, APPN, AU, AUR, BITF, BL, BTBT, BTCZ, BTDR, BTG, DNN, GDX, GLD, GLDM, GOOG, ICCM, IOVA, JDST, LLC, MARA, MJNA, MSTR, MSTU, MSTX, MSTZ, NGD, NIO, PLTD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SLGC, SLV, SOUN, SOXL, SPDN, SPXU, SQQQ, SRM, TQQQ, TSDD, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
+    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)",  "AI, APLS, APPN, AU, AUR, BITF, BL, BTBT, BTCZ, BTDR, BTG, DNN, ETHA, EXK, GDX, GLD, GLDM, GOOG, ICCM, IOVA, JDST, LLC, MARA, MJNA, MSTR, MSTU, MSTX, MSTZ, NGD, NIO, NXP, PAAS, PLTD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SLGC, SLV, SOUN, SOXL, SPDN, SPXU, SQQQ, SRM, TQQQ, TSDD, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
 
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
