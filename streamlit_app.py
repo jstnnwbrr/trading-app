@@ -891,6 +891,8 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict):
         rolling_df = df.copy()
         rolling_predictions = []
 
+        most_recent_sentiment = rolling_df['Avg_Sentiment'].iloc[-1]
+
         progress_bar = st.progress(0, text=f"Generating {n_periods}-day forecast...")
 
         for i in range(n_periods):
@@ -923,7 +925,7 @@ def rolling_forecast(df, best_model, n_periods, x_data, significant_lags_dict):
                 'Low': [max(predicted_low, 0.01)], 
                 'Open': [max(predicted_open, 0.01)],
                 'Volume': [max(predicted_volume, 0)],
-                'Avg_Sentiment': [predicted_avg_sentiment]
+                'Avg_Sentiment': [predicted_avg_sentiment] if not st.session_state['carry_forward_news_sentiment'] else [most_recent_sentiment]
                 }, index=[new_date])
 
             latest_data = pd.concat([rolling_df[['Close', 'High', 'Low', 'Open', 'Volume', 'Avg_Sentiment']], next_period_raw])
@@ -1273,6 +1275,7 @@ with st.sidebar:
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
 
+    st.session_state['carry_forward_news_sentiment'] = st.checkbox("Carry forward most recent news sentiment", value=True)
     max_trials = st.slider("Max Optimization Trials", 10, 100, 20)
     st.subheader("Performance Chart Options")
     indices_to_show = st.multiselect("Benchmarks to include", ['DJIA', 'SP500', 'Nasdaq'], default=['DJIA', 'SP500', 'Nasdaq'], help="Choose which benchmark indices to show in the portfolio performance chart")
