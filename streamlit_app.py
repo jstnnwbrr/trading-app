@@ -1115,10 +1115,9 @@ def finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods
             predicted_return = 0.0
             stop_loss_price = round(last_close * 0.94, 2)
         else:
-            if spy_open_direction == 'up':
-                if predicted_next_open != 0.01:
-                    target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2)
-            elif spy_open_direction == 'down':
+            if spy_open_direction == 'up' and predicted_next_open != 0.01 and predicted_next_open > last_close:
+                target_buy_price = round(0.75 * predicted_next_open + 0.25 * predicted_next_low, 2)
+            elif spy_open_direction == 'down' and predicted_next_open != 0.01 and predicted_next_open < last_close:
                 target_buy_price = round(0.25 * predicted_next_open + 0.75 * predicted_next_low, 2)
             else:
                 target_buy_price = round(np.mean([predicted_next_open, predicted_next_low]), 2)
