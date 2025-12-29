@@ -1269,7 +1269,7 @@ with st.sidebar:
         default_stocks = "AAPL, MSFT, GOOG, AMZN"
 
     stock_list_str = st.text_area("Paste Stock Tickers Here", default_stocks, height=150, help="Paste a list of tickers. Don't worry about formatting or weeding out supplemental information like recent returns, prices, etc. The app will clean and de-duplicate the list for you.")
-    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)",  "AI, APLS, APPN, AST, AU, AUR, BITF, BITO, BL, BTBT, BTCZ, BTDR, BTG, CAN, CGC, CGBS, CRON, DNN, ETHA, EXK, GDX, GLD, GLDM, GOOG, IBIT, ICCM, INTC, IOVA, JDST, LDTC, LLC, MARA, MJNA, MSOS, MSTR, MSTU, MSTX, MSTZ, MU, NGD, NIO, NXP, PAAS, PLTD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SLGC, SLV, SOUN, SOXL, SOXS, SPDN, SPYM, SPXU, SQQQ, SRM, TLRY, TQQQ, TSDD, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WULF", height=100, help="Tickers you do not wish to buy...")
+    do_not_buy_list_str = st.text_area("Do Not Buy List (Optional)", "AI, APLS, APPN, AST, AU, AUR, BIEI, BITF, BITO, BL, BTBT, BTCZ, BTDR, BTG, CAN, CGC, CGBS, CRON, DNN, ELPC, ETHA, EXK, GDX, GLD, GLDM, GOOG, IBIT, ICCM, INTC, IOVA, JDST, LDTC, LLC, MARA, MJNA, MSOS, MSTR, MSTU, MSTX, MSTZ, MU, NGD, NIO, NXP, PAAS, PET, PLTD, PSLV, QID, QQQU, QUBT, RDDT, RIOT, SGOL, SIX, SLGC, SLV, SMCE, SOUN, SOXL, SOXS, SPDN, SPYM, SPXU, SQQQ, SRM, TLRY, TQQQ, TSDD, TSLL, TSLQ, TSLS, TSLY, TTD, TZA, ULTY, VIST, VRNS, WLGS, WULF", height=100, help="Tickers you do not wish to buy...")
 
     st.subheader("Forecasting Parameters")
     n_periods = st.slider("Forecast Horizon (days)", 10, 100, 45)
