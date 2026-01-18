@@ -1812,7 +1812,7 @@ with tab2:
                         X_full, y_full = df.drop(columns=['Close', 'High', 'Low', 'Open', 'Volume', 'Avg_Sentiment']), df['Close']
                         best_model_for_stock.fit(X_full, y_full)
                         
-                        rolling_predictions, rolling_df = rolling_forecast(df, best_model_for_stock, n_periods, x_data, significant_lags_dict)
+                        rolling_predictions, rolling_df = rolling_forecast(stock_name, df, best_model_for_stock, n_periods, x_data, significant_lags_dict)
                         rolling_forecast_df, summary_df = finalize_forecast_and_metrics(stock_name, rolling_predictions, df, n_periods, rolling_df)
                     
                     forecast_results[stock_name] = rolling_forecast_df
